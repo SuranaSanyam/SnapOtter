@@ -334,6 +334,11 @@ export function useToolProcessor(toolId: string) {
   const failRunOnHandlerError = useCallback(
     (es: EventSource) => {
       if (!activeJobIdRef.current && !useFileStore.getState().processing) return;
+      // A failed run shows no result. The completion branch sets the payload
+      // only after its store writes, but its teardown can still throw after
+      // that (#1739).
+      setWarning(null);
+      setResultPayload(null);
       clearStallTimer();
       clearJobEvidenceTimer();
       if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -467,8 +472,6 @@ export function useToolProcessor(toolId: string) {
               const idx = activeEntryIndexRef.current ?? useFileStore.getState().selectedIndex;
 
               const result = data.result as unknown as ProcessResult;
-              setWarning(result.warning ?? null);
-              setResultPayload(result as unknown as Record<string, unknown>);
               if (result.savedFileId) {
                 useFileStore.getState().setLastSavedLibraryFileId(result.savedFileId);
               }
@@ -487,6 +490,13 @@ export function useToolProcessor(toolId: string) {
               // An auto-saved result is already in the library, so it was never at risk.
               // Must follow the updateEntry above; see the `claimed` invariant in file-store.
               if (result.savedFileId) useFileStore.getState().markClaimed(idx);
+              // After the store writes, as in landSyncResult: tools that
+              // render straight from the payload (histogram, sprite sheet)
+              // must not show a result beside the error a failed write ends
+              // the run with (#1739). Before the teardown, so a good run
+              // never ends processing with no payload.
+              setWarning(result.warning ?? null);
+              setResultPayload(result as unknown as Record<string, unknown>);
               clearActiveJob();
               setProcessing(false);
               setProgress(IDLE_PROGRESS);

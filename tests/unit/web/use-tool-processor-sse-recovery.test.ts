@@ -315,6 +315,130 @@ describe("useToolProcessor SSE recovery", () => {
       }
     });
 
+    // #1739: the completion branch set the payload and warning before its
+    // store writes, so a write that threw left tools that render straight
+    // from resultPayload (histogram, sprite sheet, LQIP) showing a finished
+    // result beside the tracking error. The sync path (#1354) already sets
+    // them last.
+    describe("result payload on a failed landing (#1739)", () => {
+      const WARNED_FRAME = {
+        data: JSON.stringify({
+          type: "single",
+          phase: "complete",
+          percent: 100,
+          result: {
+            jobId: "server-job",
+            downloadUrl: "/api/v1/download/server-job/upscaled.png",
+            originalSize: 64,
+            processedSize: 128,
+            savedFileId: "saved-file",
+            warning: "Output was clamped",
+          },
+        }),
+      } as MessageEvent;
+      const realMarkClaimed = useFileStore.getState().markClaimed;
+      afterEach(() => {
+        useFileStore.setState({ markClaimed: realMarkClaimed });
+      });
+
+      it("shows no payload or warning when the entry write throws", () => {
+        const { result, unmount } = startRun({ async: true });
+        vi.spyOn(useFileStore.getState(), "updateEntry")
+          .mockImplementationOnce(() => {
+            throw new Error("boom");
+          })
+          .mockImplementation(realUpdateEntry);
+
+        expect(() =>
+          act(() => {
+            MockEventSource.instances[0].onmessage?.(WARNED_FRAME);
+          }),
+        ).toThrow("boom");
+        // act skips its flush when the callback throws.
+        act(() => {});
+
+        expect(useFileStore.getState().error).toBe(HANDLER_FAILURE);
+        expect(useFileStore.getState().entries[0].status).toBe("failed");
+        expect(result.current.resultPayload).toBeNull();
+        expect(result.current.warning).toBeNull();
+
+        unmount();
+      });
+
+      it("shows no payload or warning when marking the auto-saved result claimed throws", () => {
+        const { result, unmount } = startRun({ async: true });
+        vi.spyOn(useFileStore.getState(), "markClaimed").mockImplementation(() => {
+          throw new Error("claim broke");
+        });
+
+        expect(() =>
+          act(() => {
+            MockEventSource.instances[0].onmessage?.(WARNED_FRAME);
+          }),
+        ).toThrow("claim broke");
+        act(() => {});
+
+        expect(useFileStore.getState().processing).toBe(false);
+        expect(useFileStore.getState().error).toBe(HANDLER_FAILURE);
+        expect(result.current.resultPayload).toBeNull();
+        expect(result.current.warning).toBeNull();
+        // The result did land before the claim threw, so the entry keeps it
+        // (the sync path's failEntry does the same).
+        expect(useFileStore.getState().entries[0].status).toBe("completed");
+
+        unmount();
+      });
+
+      it("drops the payload when ending the run throws after it was set", () => {
+        const { result, unmount } = startRun({ async: true });
+        // clearActiveJob nulls the job ref before its store write, so a
+        // listener that throws on that write leaves processing on and the
+        // handler-error teardown still has a live run to fail.
+        const unsubscribe = useFileStore.subscribe((state, prev) => {
+          if (prev.activeJobId && !state.activeJobId) throw new Error("teardown write broke");
+        });
+
+        try {
+          expect(() =>
+            act(() => {
+              MockEventSource.instances[0].onmessage?.(WARNED_FRAME);
+            }),
+          ).toThrow("teardown write broke");
+          act(() => {});
+
+          expect(useFileStore.getState().processing).toBe(false);
+          expect(useFileStore.getState().error).toBe(HANDLER_FAILURE);
+          expect(result.current.resultPayload).toBeNull();
+          expect(result.current.warning).toBeNull();
+        } finally {
+          unsubscribe();
+          unmount();
+        }
+      });
+
+      it("shows the payload and warning once a completion lands", () => {
+        const { result, unmount } = startRun({ async: true });
+
+        act(() => {
+          MockEventSource.instances[0].onmessage?.(WARNED_FRAME);
+        });
+
+        expect(useFileStore.getState().processing).toBe(false);
+        expect(useFileStore.getState().error).toBeNull();
+        expect(useFileStore.getState().entries[0]).toMatchObject({
+          status: "completed",
+          claimed: true,
+        });
+        expect(result.current.resultPayload).toMatchObject({
+          downloadUrl: "/api/v1/download/server-job/upscaled.png",
+          savedFileId: "saved-file",
+        });
+        expect(result.current.warning).toBe("Output was clamped");
+
+        unmount();
+      });
+    });
+
     it("still ignores a malformed frame", () => {
       const { unmount } = startRun({ async: true });
 
