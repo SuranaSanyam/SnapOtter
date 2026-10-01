@@ -123,6 +123,37 @@ describe("OCR v3 bundle release workflow", () => {
     expect(job(bundles, "build-ocr", "verify-ocr")).toContain(
       "Audit exact OCR runtime dependency lock",
     );
+
+    // The required "Python Dependency Audit" check must also cover the lock the
+    // HuggingFace publish job installs with the write token in scope (#1761).
+    // Parsed rather than substring-matched, so `|| true`, `continue-on-error`,
+    // an `if:`, or a shell without -e can't turn the audit into a no-op while
+    // this stays green.
+    const ciParsed = load(ci) as {
+      defaults?: unknown;
+      jobs: Record<string, Record<string, unknown> & { steps: Record<string, unknown>[] }>;
+    };
+    const ciAuditJob = ciParsed.jobs["pip-audit"];
+    expect(ciAuditJob.name).toBe("Python Dependency Audit");
+    expect(ciParsed.defaults).toBeUndefined();
+    expect(ciAuditJob.defaults).toBeUndefined();
+    expect(ciAuditJob["continue-on-error"]).toBeUndefined();
+    const lockStep = ciAuditJob.steps.find(
+      (step) => step.name === "Audit exact OCR runtime and HF release dependency locks",
+    );
+    expect(lockStep, "lock audit step is missing").toBeDefined();
+    expect(Object.keys(lockStep ?? {}).sort()).toEqual(["name", "run"]);
+    expect(lockStep?.run).toBe(
+      [
+        "for requirements in \\",
+        "  docker/ocr-runtime-requirements-amd64.txt \\",
+        "  docker/ocr-runtime-requirements-arm64.txt \\",
+        "  docker/hf-release-requirements.txt; do",
+        '  pip-audit -r "${requirements}" --no-deps --disable-pip --aliases',
+        "done",
+        "",
+      ].join("\n"),
+    );
   });
 
   it("scans and inventories both architecture-specific release images", () => {
@@ -661,7 +692,9 @@ describe("OCR v3 bundle release workflow", () => {
     expect(requirements).toContain("huggingface-hub==0.36.2");
     expect(requirements).toContain("hf-xet==");
     expect(requirements).toContain("--hash=sha256:");
-    // Same urllib3 advisories as the OCR runtime locks (#1760); CI only audits those.
+    // Same urllib3 advisories as the OCR runtime locks (#1760). CI's pip-audit
+    // job audits this lock too (#1761), so the next CI run after an advisory
+    // lands against a pin here goes red.
     expect(requirements).toMatch(
       /^urllib3==2\.8\.0 \\\n {4}--hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \\\n {4}--hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63$/m,
     );
