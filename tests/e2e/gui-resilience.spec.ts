@@ -1477,6 +1477,57 @@ test.describe("Processing State Cleanup", () => {
     await page.unroute("**/api/v1/tools/image/resize");
   });
 
+  test("a failed async run ends with its failure card and disarms cancel", async ({
+    loggedInPage: page,
+  }) => {
+    // #1698: every failure exit tears the run down before it fails the
+    // entry. Both have to land: the entry at "failed" gates the failure card,
+    // and the teardown takes down the progress card's armed cancel button.
+    const message = "Resize could not finish this image";
+    await page.goto("/image/resize");
+    await uploadTestImage(page);
+
+    // The progress stream opens before the POST. Hold it until the 202 has
+    // armed the cancel button, then deliver the job's failed frame.
+    let releaseFrame: () => void = () => {};
+    const frameReleased = new Promise<void>((resolve) => {
+      releaseFrame = resolve;
+    });
+    await page.route("**/api/v1/jobs/*/progress", async (route) => {
+      await frameReleased;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({ type: "single", phase: "failed", percent: 0, error: message })}\n\n`,
+      });
+    });
+    await page.route("**/api/v1/tools/image/resize", (route) =>
+      route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ jobId: "e2e-1698", async: true }),
+      }),
+    );
+
+    await page.locator("input[placeholder='Auto']").first().fill("50");
+    await page.getByRole("button", { name: "Resize" }).click();
+
+    const cancel = page.getByRole("button", { name: "Cancel" });
+    await expect(cancel).toBeVisible({ timeout: 15_000 });
+    releaseFrame();
+
+    // The settings form shows the error too; the failure card is the one in
+    // the preview area, and it only renders once the entry is "failed".
+    await expect(page.getByLabel("Preview area").getByText(message)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(cancel).toHaveCount(0);
+
+    await page.unroute("**/api/v1/tools/image/resize");
+    await page.unroute("**/api/v1/jobs/*/progress");
+  });
+
   test("successful processing followed by clear resets fully", async ({ loggedInPage: page }) => {
     await page.goto("/image/resize");
     await uploadTestImage(page);
