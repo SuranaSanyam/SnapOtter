@@ -8,11 +8,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────────────────
 
+// Every db.select() in this file resolves to these rows; reset them after use.
+const jobRows = vi.hoisted(() => ({ rows: [] as unknown[] }));
+
 vi.mock("../../../apps/api/src/db/index.js", () => ({
   db: {
     select: vi.fn(() => ({
       from: () => ({
-        where: () => ({ get: () => null }),
+        where: () => Object.assign(Promise.resolve(jobRows.rows), { get: () => null }),
         all: () => [],
       }),
     })),
@@ -795,6 +798,82 @@ describe("createToolRoute", () => {
           details: "Sharp exploded",
         }),
       );
+    });
+
+    it("answers the status the worker recorded for rejected input", async () => {
+      vi.mocked(waitForJob).mockRejectedValueOnce(new Error("Start is past the end"));
+      jobRows.rows = [
+        { error: { message: "Start is past the end", code: "OUT_OF_RANGE", httpStatus: 400 } },
+      ];
+      const app = createMockApp();
+      const id = "resize";
+      createToolRoute(app as never, makeMockConfig(id));
+      const reply = createMockReply();
+      const req = createMockRequest({ fileBuffer: Buffer.from("png-data"), settings: "{}" });
+
+      try {
+        await app.routes[apiToolPath(id)](req, reply);
+      } finally {
+        jobRows.rows = [];
+      }
+
+      expect(reply.status).toHaveBeenCalledWith(400);
+      expect(reply.send).toHaveBeenCalledWith({
+        error: "Start is past the end",
+        code: "OUT_OF_RANGE",
+      });
+    });
+
+    it("answers a recorded server-side status and logs it as a failure", async () => {
+      vi.mocked(waitForJob).mockRejectedValueOnce(new Error("qpdf is not available"));
+      jobRows.rows = [
+        {
+          error: {
+            message: "qpdf is not available",
+            code: "ENGINE_UNAVAILABLE",
+            details: "Check QPDF_PATH",
+            httpStatus: 503,
+          },
+        },
+      ];
+      const app = createMockApp();
+      const id = "resize";
+      createToolRoute(app as never, makeMockConfig(id));
+      const reply = createMockReply();
+      const req = createMockRequest({ fileBuffer: Buffer.from("png-data"), settings: "{}" });
+      const log = (req as { log: { error: ReturnType<typeof vi.fn> } }).log;
+
+      try {
+        await app.routes[apiToolPath(id)](req, reply);
+      } finally {
+        jobRows.rows = [];
+      }
+
+      expect(reply.status).toHaveBeenCalledWith(503);
+      expect(reply.send).toHaveBeenCalledWith({
+        error: "qpdf is not available",
+        details: "Check QPDF_PATH",
+        code: "ENGINE_UNAVAILABLE",
+      });
+      expect(log.error).toHaveBeenCalledWith(expect.anything(), "tool processing failed");
+    });
+
+    it("keeps the 422 when the failed job recorded no status", async () => {
+      vi.mocked(waitForJob).mockRejectedValueOnce(new Error("Sharp exploded"));
+      jobRows.rows = [{ error: { message: "Sharp exploded" } }];
+      const app = createMockApp();
+      const id = "resize";
+      createToolRoute(app as never, makeMockConfig(id));
+      const reply = createMockReply();
+      const req = createMockRequest({ fileBuffer: Buffer.from("png-data"), settings: "{}" });
+
+      try {
+        await app.routes[apiToolPath(id)](req, reply);
+      } finally {
+        jobRows.rows = [];
+      }
+
+      expect(reply.status).toHaveBeenCalledWith(422);
     });
 
     it("uses empty settings when none are provided", async () => {

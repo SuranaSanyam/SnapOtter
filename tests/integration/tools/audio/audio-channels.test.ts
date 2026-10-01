@@ -82,7 +82,7 @@ describe.skipIf(!ffmpegAvailable())("audio-channels (requires ffmpeg)", () => {
     });
     expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
-    expect(body.details).toMatch(/stereo input/i);
+    expect(body.error).toMatch(/stereo input/i);
   }, 60_000);
 
   it("rejects missing mode (400)", async () => {
