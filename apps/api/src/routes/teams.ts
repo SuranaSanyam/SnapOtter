@@ -16,16 +16,24 @@ import { db, schema } from "../db/index.js";
 import { isUniqueViolation } from "../lib/pg-errors.js";
 import { requirePermission } from "../permissions.js";
 
-const teamBodySchema = z.object({
-  name: z
-    .string({ required_error: "Team name is required" })
-    .transform((v) => v.trim())
-    .pipe(
-      z
-        .string()
-        .min(1, "Team name is required")
-        .max(TEAM_NAME_MAX_LENGTH, "Team name must be 50 characters or fewer"),
-    ),
+const teamNameField = z
+  .string({ required_error: "Team name is required" })
+  .transform((v) => v.trim())
+  .pipe(
+    z
+      .string()
+      .min(1, "Team name is required")
+      .max(TEAM_NAME_MAX_LENGTH, "Team name must be 50 characters or fewer"),
+  );
+
+const createTeamSchema = z.object({
+  name: teamNameField,
+  storageQuota: z.number().int().positive().nullable().optional(),
+  retentionHours: z.number().int().positive().nullable().optional(),
+});
+
+const updateTeamSchema = z.object({
+  name: teamNameField.optional(),
   storageQuota: z.number().int().positive().nullable().optional(),
   retentionHours: z.number().int().positive().nullable().optional(),
 });
@@ -60,7 +68,7 @@ export async function teamsRoutes(app: FastifyInstance): Promise<void> {
     const admin = await requirePermission("teams:manage")(request, reply);
     if (!admin) return;
 
-    const parsed = teamBodySchema.safeParse(request.body);
+    const parsed = createTeamSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
         error: parsed.error.issues.map((i) => i.message).join("; "),
@@ -108,7 +116,7 @@ export async function teamsRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // PUT /api/v1/teams/:id — Rename team (admin only)
+  // PUT /api/v1/teams/:id — Update team (admin only)
   app.put(
     "/api/v1/teams/:id",
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -122,7 +130,7 @@ export async function teamsRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: "Team not found", code: "NOT_FOUND" });
       }
 
-      const parsed = teamBodySchema.safeParse(request.body);
+      const parsed = updateTeamSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
           error: parsed.error.issues.map((i) => i.message).join("; "),
@@ -132,31 +140,36 @@ export async function teamsRoutes(app: FastifyInstance): Promise<void> {
       const { name: trimmedName, storageQuota, retentionHours } = parsed.data;
 
       // Check for duplicate name (case-insensitive), excluding current team
-      const [duplicate] = await db
-        .select()
-        .from(schema.teams)
-        .where(
-          sql`LOWER(${schema.teams.name}) = LOWER(${trimmedName}) AND ${schema.teams.id} != ${id}`,
-        );
+      if (trimmedName !== undefined) {
+        const [duplicate] = await db
+          .select()
+          .from(schema.teams)
+          .where(
+            sql`LOWER(${schema.teams.name}) = LOWER(${trimmedName}) AND ${schema.teams.id} != ${id}`,
+          );
 
-      if (duplicate) {
-        return reply.status(409).send({ error: "Team name already exists", code: "CONFLICT" });
+        if (duplicate) {
+          return reply.status(409).send({ error: "Team name already exists", code: "CONFLICT" });
+        }
       }
 
-      const updateFields: Partial<typeof schema.teams.$inferInsert> = { name: trimmedName };
+      const updateFields: Partial<typeof schema.teams.$inferInsert> = {};
+      if (trimmedName !== undefined) updateFields.name = trimmedName;
       if (storageQuota !== undefined) updateFields.storageQuota = storageQuota;
       if (retentionHours !== undefined) updateFields.retentionHours = retentionHours;
 
-      // The pre-check above can't close the race: two concurrent renames
-      // onto the same name both pass it before either UPDATE commits
-      // (issue #968), so the loser's 23505 maps to the pre-check's 409.
-      try {
-        await db.update(schema.teams).set(updateFields).where(eq(schema.teams.id, id));
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          return reply.status(409).send({ error: "Team name already exists", code: "CONFLICT" });
+      if (Object.keys(updateFields).length > 0) {
+        // The pre-check above can't close the race: two concurrent renames
+        // onto the same name both pass it before either UPDATE commits
+        // (issue #968), so the loser's 23505 maps to the pre-check's 409.
+        try {
+          await db.update(schema.teams).set(updateFields).where(eq(schema.teams.id, id));
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            return reply.status(409).send({ error: "Team name already exists", code: "CONFLICT" });
+          }
+          throw err;
         }
-        throw err;
       }
 
       return reply.send({ ok: true });
