@@ -61,6 +61,31 @@ function isIgnoredNetworkError(err: unknown): boolean {
   );
 }
 
+/**
+ * Why a save failed, when the server said. "expired" (the result is gone) and
+ * "tooLarge" (over the upload limit) can't succeed on a retry; "quota" can,
+ * once the user frees some space. "generic" is everything else (#1350).
+ */
+type SaveFailure = "expired" | "quota" | "tooLarge" | "generic";
+
+/** What a failed library upload was about. Only 413s have a reason to show. */
+async function uploadFailure(res: Response): Promise<SaveFailure> {
+  if (res.status !== 413) return "generic";
+  // Both the quota and the upload size limit answer 413; only the quota
+  // carries this code. A reverse proxy's 413 is an HTML page: the size limit.
+  if (!res.headers.get("content-type")?.includes("application/json")) return "tooLarge";
+  try {
+    const body: unknown = await res.json();
+    return (body as { code?: unknown } | null)?.code === "STORAGE_QUOTA_EXCEEDED"
+      ? "quota"
+      : "tooLarge";
+  } catch {
+    // Our JSON answer, cut off before it could be read: it may have been the
+    // quota, so don't claim a reason, and leave the retry open.
+    return "generic";
+  }
+}
+
 interface ReviewPanelProps {
   filename: string;
   fileSize: number;
@@ -110,19 +135,33 @@ export function ReviewPanel({
   };
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  // The error label resets itself after a few seconds. A retry clears the
-  // pending reset, or it would flip a retry's "Saved" back to an enabled
+  const [saveFailure, setSaveFailure] = useState<SaveFailure>("generic");
+  // A generic error label resets itself after a few seconds. A retry clears
+  // the pending reset, or it would flip a retry's "Saved" back to an enabled
   // button and invite a duplicate save.
   const errorResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => clearTimeout(errorResetRef.current ?? undefined), []);
+  // The panel isn't remounted when it moves to another result (the thumbnail
+  // strip, or a re-run). A failure with a reason stays up, and a save still in
+  // flight would otherwise land its outcome on the new result, so both are
+  // about the old one: clear them, and let a late save finish without
+  // touching this panel's state.
+  const shownUrlRef = useRef(downloadUrl);
+  useEffect(() => {
+    shownUrlRef.current = downloadUrl;
+    clearTimeout(errorResetRef.current ?? undefined);
+    setSaveStatus((status) => (status === "error" || status === "saving" ? "idle" : status));
+  }, [downloadUrl]);
 
   const handleSaveToFiles = useCallback(async () => {
     // Capture before the awaits below: the thumbnail strip can move the
     // selection while the upload is in flight, and the claim must land on the
     // entry that was actually saved.
     const claimIndex = useFileStore.getState().selectedIndex;
+    const stillShown = () => shownUrlRef.current === downloadUrl;
     clearTimeout(errorResetRef.current ?? undefined);
     setSaveStatus("saving");
+    let failure: SaveFailure = "generic";
     try {
       const res = await fetch(downloadUrl);
       // An expired or missing result answers with an error page. Uploading
@@ -130,6 +169,7 @@ export function ReviewPanel({
       // (#1286). The status goes in the message because Sentry's scrubber
       // keeps a SafeError's message but drops its code.
       if (!res.ok) {
+        if (res.status === 404 || res.status === 410) failure = "expired";
         throw new SafeError(`Save to Files could not fetch the result (HTTP ${res.status})`, {
           code: `save-result-fetch-${res.status}`,
           statusCode: res.status,
@@ -147,12 +187,13 @@ export function ReviewPanel({
         body: formData,
       });
       if (!uploadRes.ok) {
+        failure = await uploadFailure(uploadRes);
         throw new SafeError(`Save to Files upload failed (HTTP ${uploadRes.status})`, {
           code: `save-upload-${uploadRes.status}`,
           statusCode: uploadRes.status,
         });
       }
-      setSaveStatus("saved");
+      if (stillShown()) setSaveStatus("saved");
       useFileStore.getState().markClaimed(claimIndex);
       // "Save to library" is the real success signal for a self-hosted tool
       // (there is no purchase). result_saved was defined + allowlisted but never
@@ -173,8 +214,14 @@ export function ReviewPanel({
           { error_class: "operational", ...(currentToolId ? { tool_id: currentToolId } : {}) },
         );
       }
+      if (!stillShown()) return;
+      setSaveFailure(failure);
       setSaveStatus("error");
-      errorResetRef.current = setTimeout(() => setSaveStatus("idle"), 3000);
+      // A reason stays on screen: it tells the user what to do, and the
+      // generic label's reset would hand back a button that fails the same way.
+      if (failure === "generic") {
+        errorResetRef.current = setTimeout(() => setSaveStatus("idle"), 3000);
+      }
     }
   }, [downloadUrl, filename, fileType, currentToolId]);
 
@@ -285,7 +332,11 @@ export function ReviewPanel({
           <button
             type="button"
             onClick={handleSaveToFiles}
-            disabled={saveStatus === "saving" || saveStatus === "saved"}
+            disabled={
+              saveStatus === "saving" ||
+              saveStatus === "saved" ||
+              (saveStatus === "error" && (saveFailure === "expired" || saveFailure === "tooLarge"))
+            }
             className={cn(
               "text-xs flex items-center gap-1.5 transition-colors",
               saveStatus === "saved"
@@ -309,7 +360,12 @@ export function ReviewPanel({
               : saveStatus === "saved"
                 ? t.toolPage.savedToFiles
                 : saveStatus === "error"
-                  ? t.common.error
+                  ? {
+                      expired: t.toolPage.resultExpired,
+                      quota: t.toolPage.libraryFull,
+                      tooLarge: t.errors.fileTooLarge,
+                      generic: t.common.error,
+                    }[saveFailure]
                   : t.toolPage.saveToFiles}
           </button>
         </div>
