@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ProgressCard } from "@/components/common/progress-card";
 import { ResultDownloadLink } from "@/components/common/result-download-link";
 import { useTranslation } from "@/contexts/i18n-context";
+import { useTimeouts } from "@/hooks/use-timeouts";
 import { useToolProcessor } from "@/hooks/use-tool-processor";
 import { format as formatMessage } from "@/lib/format";
 import { copyToClipboard } from "@/lib/utils";
@@ -30,6 +31,13 @@ export function SpriteSheetSettings() {
   const [format, setFormat] = useState<OutputFormat>("png");
   const [quality, setQuality] = useState(90);
   const [copiedExport, setCopiedExport] = useState<"css" | "json" | null>(null);
+  // The flag lives here, so its reset does too: a re-run unmounts SpriteOutput
+  // but not this panel, and a reset owned by the child would leave it stuck.
+  const later = useTimeouts();
+  const flashCopied = (kind: "css" | "json") => {
+    setCopiedExport(kind);
+    later(() => setCopiedExport(null), 1500);
+  };
 
   const handleProcess = () => {
     const settings = { columns, padding, background, format, quality };
@@ -184,7 +192,7 @@ export function SpriteSheetSettings() {
           payload={resultPayload}
           format={format}
           copiedExport={copiedExport}
-          setCopiedExport={setCopiedExport}
+          onCopied={flashCopied}
         />
       )}
     </form>
@@ -195,12 +203,12 @@ function SpriteOutput({
   payload,
   format,
   copiedExport,
-  setCopiedExport,
+  onCopied,
 }: {
   payload: Record<string, unknown>;
   format: OutputFormat;
   copiedExport: "css" | "json" | null;
-  setCopiedExport: (v: "css" | "json" | null) => void;
+  onCopied: (kind: "css" | "json") => void;
 }) {
   const { t } = useTranslation();
   const frames = payload.frames as Frame[];
@@ -223,8 +231,7 @@ function SpriteOutput({
       .join("\n");
     const ok = await copyToClipboard(`${base}\n${rules}`);
     if (ok) {
-      setCopiedExport("css");
-      setTimeout(() => setCopiedExport(null), 1500);
+      onCopied("css");
     }
   };
 
@@ -237,8 +244,7 @@ function SpriteOutput({
       ),
     );
     if (ok) {
-      setCopiedExport("json");
-      setTimeout(() => setCopiedExport(null), 1500);
+      onCopied("json");
     }
   };
 
