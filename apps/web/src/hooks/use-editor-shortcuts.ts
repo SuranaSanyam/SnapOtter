@@ -719,6 +719,7 @@ export function useEditorShortcuts(callbacks?: {
     "escape",
     (e) => {
       e.preventDefault();
+      if (polygonalLassoRefHolder.current?.cancel()) return;
       const state = useEditorStore.getState();
       if (state.isCropping) {
         state.setCropState(null);
