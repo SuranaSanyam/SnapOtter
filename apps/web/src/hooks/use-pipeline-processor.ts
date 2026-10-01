@@ -150,16 +150,17 @@ export function usePipelineProcessor() {
   // throws: some exits run right after a store write threw (a broken
   // completion write, #1287 and #1354), and a second throw here must not
   // leave the run stuck at processing with the cancel button still armed.
+  // Each entry gets its own try, so one write that throws can't leave a
+  // batch's later entries pulsing (#1779).
   const settleProcessingEntries = useCallback((message: string) => {
-    try {
-      const { entries, updateEntry } = useFileStore.getState();
-      for (let i = 0; i < entries.length; i++) {
-        if (entries[i]?.status === "processing") {
-          updateEntry(i, { status: "failed", error: message });
-        }
+    const { entries, updateEntry } = useFileStore.getState();
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i]?.status !== "processing") continue;
+      try {
+        updateEntry(i, { status: "failed", error: message });
+      } catch (err) {
+        console.error("Failing the run's entry failed", err);
       }
-    } catch (err) {
-      console.error("Failing the run's entry failed", err);
     }
   }, []);
 
@@ -199,23 +200,32 @@ export function usePipelineProcessor() {
   const cancelCurrentJob = useCallback(async () => {
     const jobId = activeJobIdRef.current;
     if (!jobId) return;
+    // Only the request may fail quietly: a cancel that never reached the
+    // server says nothing about the job, and the progress stream still owns
+    // settling it. A throw from the teardown below is ours and must reach
+    // the caller instead of vanishing (#1779, the twin of #1698).
+    let res: Response;
     try {
-      const res = await fetch(appUrl(`/api/v1/jobs/${jobId}/cancel`), {
+      res = await fetch(appUrl(`/api/v1/jobs/${jobId}/cancel`), {
         method: "POST",
         headers: formatHeaders(),
       });
-      // Record intent only on an acknowledged cancel: a failed or refused
-      // POST must not repaint the run's real outcome as canceled (#767).
-      if (res.ok) {
-        const body = (await res.json().catch(() => null)) as { canceled?: boolean } | null;
-        if (body?.canceled === true && activeJobIdRef.current === jobId) {
-          canceledByUserRef.current = true;
-        }
+    } catch {
+      return;
+    }
+    // Record intent only on an acknowledged cancel: a failed or refused
+    // POST must not repaint the run's real outcome as canceled (#767).
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as { canceled?: boolean } | null;
+      if (body?.canceled === true && activeJobIdRef.current === jobId) {
+        canceledByUserRef.current = true;
       }
-      // 404 means no job exists server-side. Nothing will ever emit a
-      // frame, so settle locally as canceled instead of blaming the network
-      // 30 seconds later.
-      if (res.status === 404 && activeJobIdRef.current === jobId) {
+    }
+    // 404 means no job exists server-side. Nothing will ever emit a
+    // frame, so settle locally as canceled instead of blaming the network
+    // 30 seconds later.
+    if (res.status === 404 && activeJobIdRef.current === jobId) {
+      try {
         xhrRef.current?.abort();
         clearJobEvidenceTimer();
         clearStallTimer();
@@ -229,10 +239,12 @@ export function usePipelineProcessor() {
         setError("Canceled");
         setProcessing(false);
         setProgress(IDLE_PROGRESS);
+      } finally {
+        // The stream is already closed, so nothing else will settle the
+        // entries: a throwing teardown must not leave them pulsing. Its
+        // throw still reaches the caller.
         settleProcessingEntries("Canceled");
       }
-    } catch {
-      // Cancel request failed; the SSE handler owns cleanup
     }
   }, [
     clearJobEvidenceTimer,
