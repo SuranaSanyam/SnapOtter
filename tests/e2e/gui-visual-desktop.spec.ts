@@ -450,11 +450,30 @@ test.describe("Visual Desktop (1280x720)", () => {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(500);
 
-    // Focus search bar via keyboard shortcut
-    await page.keyboard.press(`${MOD}+k`);
-    await page.waitForTimeout(300);
+    const search = page.locator("[data-search-input]");
 
-    await takeThemedScreenshots(page, "home-search-focused");
+    // Light theme: focus the search bar via its keyboard shortcut
+    await setTheme(page, "light");
+    await page.keyboard.press(`${MOD}+k`);
+    await expect(search).toBeFocused();
+    await page.waitForTimeout(300);
+    await expect(page).toHaveScreenshot("desktop-home-search-focused-light.png", {
+      fullPage: false,
+    });
+
+    // Dark theme: setTheme clicks the nav toggle, which takes focus, so focus
+    // the search bar again after the switch. Without this the dark shot shows
+    // the search box unfocused (#1527). The focus ring is under the 1% pixel
+    // tolerance, so the screenshot alone would not notice. setTheme's shortcut
+    // fallback is ignored while the input has focus, so check the theme too.
+    await setTheme(page, "dark");
+    await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+    await page.keyboard.press(`${MOD}+k`);
+    await expect(search).toBeFocused();
+    await page.waitForTimeout(300);
+    await expect(page).toHaveScreenshot("desktop-home-search-focused-dark.png", {
+      fullPage: false,
+    });
   });
 
   // ---- Tool page - strip-metadata (no-comparison mode) ----
