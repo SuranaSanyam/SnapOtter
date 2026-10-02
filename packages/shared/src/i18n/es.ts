@@ -1230,7 +1230,13 @@ export const es: TranslationKeys = {
       name: "Constructor de Pipeline",
       description: "Encadena múltiples herramientas en un flujo de trabajo",
     },
-    processing: { canceled: "Procesamiento cancelado" },
+    processing: {
+      canceled: "Procesamiento cancelado",
+      cancelUnavailable: "Este proceso no se puede cancelar ahora. Sigue en curso.",
+      cancelNotAllowed:
+        "No se pudo cancelar: has cerrado sesión o no tienes permiso para detener este proceso. Sigue en curso.",
+      cancelFailed: "No se pudo cancelar el proceso. Sigue en curso, inténtalo de nuevo.",
+    },
     mediaPlayer: {
       unsupported: "Tu navegador no admite este formato de medios.",
     },

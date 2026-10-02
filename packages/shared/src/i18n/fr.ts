@@ -1251,7 +1251,13 @@ export const fr: TranslationKeys = {
       name: "Constructeur de Pipeline",
       description: "Enchaînez plusieurs outils dans un flux de travail",
     },
-    processing: { canceled: "Traitement annulé" },
+    processing: {
+      canceled: "Traitement annulé",
+      cancelUnavailable: "Ce traitement ne peut pas être annulé pour l'instant. Il continue.",
+      cancelNotAllowed:
+        "Annulation impossible : vous êtes déconnecté ou n'êtes pas autorisé à arrêter ce traitement. Il continue.",
+      cancelFailed: "Impossible d'annuler le traitement. Il continue, réessayez.",
+    },
     mediaPlayer: {
       unsupported: "Votre navigateur ne prend pas en charge ce format multimédia.",
     },

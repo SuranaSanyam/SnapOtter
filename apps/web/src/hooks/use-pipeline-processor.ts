@@ -5,6 +5,7 @@ import { track } from "@/lib/analytics";
 import { formatHeaders, parseApiError } from "@/lib/api";
 import { appUrl, resolveServerUrls, serverUrl } from "@/lib/app-url";
 import { featureNotInstalledMessage } from "@/lib/bundle-i18n";
+import { failedCancelRequest, readCancelAnswer } from "@/lib/cancel-refusal";
 import {
   checkToolResult,
   FRAME_HANDLING_FAILED,
@@ -209,31 +210,32 @@ export function usePipelineProcessor() {
   const cancelCurrentJob = useCallback(async () => {
     const jobId = activeJobIdRef.current;
     if (!jobId) return;
-    // Only the request may fail quietly: a cancel that never reached the
-    // server says nothing about the job, and the progress stream still owns
-    // settling it. A throw from the teardown below is ours and must reach
-    // the caller instead of vanishing (#1779, the twin of #1698).
+    // A cancel that never reached the server says nothing about the job, so
+    // the run is left to the progress stream, but the click still gets an
+    // answer: the rejection is the cancel button's to show (#1815). A throw
+    // from the teardown below is ours and must reach the caller too (#1779,
+    // the twin of #1698).
     let res: Response;
     try {
       res = await fetch(appUrl(`/api/v1/jobs/${jobId}/cancel`), {
         method: "POST",
         headers: formatHeaders(),
       });
-    } catch {
+    } catch (cause) {
+      throw failedCancelRequest(cause);
+    }
+    // A refused cancel throws here and the run carries on: it must not be
+    // repainted as canceled (#767), but the button says why (#1815).
+    const answer = await readCancelAnswer(res, () => activeJobIdRef.current === jobId);
+    // Record intent only on an acknowledged cancel.
+    if (answer === "acknowledged") {
+      canceledByUserRef.current = true;
       return;
     }
-    // Record intent only on an acknowledged cancel: a failed or refused
-    // POST must not repaint the run's real outcome as canceled (#767).
-    if (res.ok) {
-      const body = (await res.json().catch(() => null)) as { canceled?: boolean } | null;
-      if (body?.canceled === true && activeJobIdRef.current === jobId) {
-        canceledByUserRef.current = true;
-      }
-    }
-    // 404 means no job exists server-side. Nothing will ever emit a
+    // A 404 means no job exists server-side. Nothing will ever emit a
     // frame, so settle locally as canceled instead of blaming the network
     // 30 seconds later.
-    if (res.status === 404 && activeJobIdRef.current === jobId) {
+    if (answer === "missing") {
       // The stream closes here, so nothing else will ever end this run:
       // each write gets its own guard, or one that throws would leave the
       // run spinning with its cancel button already gone (#1814).

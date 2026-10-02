@@ -1244,7 +1244,13 @@ export const pl: TranslationKeys = {
       name: "Konstruktor Pipeline",
       description: "Łączenie wielu narzędzi w przepływ pracy",
     },
-    processing: { canceled: "Przetwarzanie anulowane" },
+    processing: {
+      canceled: "Przetwarzanie anulowane",
+      cancelUnavailable: "Tego przetwarzania nie można teraz anulować. Nadal trwa.",
+      cancelNotAllowed:
+        "Nie można anulować: wylogowano cię lub nie masz uprawnień, by zatrzymać to przetwarzanie. Nadal trwa.",
+      cancelFailed: "Nie udało się anulować przetwarzania. Nadal trwa, spróbuj ponownie.",
+    },
     mediaPlayer: {
       unsupported: "Twoja przeglądarka nie obsługuje tego formatu multimediów.",
     },
