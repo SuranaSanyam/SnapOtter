@@ -76,6 +76,67 @@ async function rotatingPhraseMask(page: import("@playwright/test").Page) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: fail unless `count` images match and every one has decoded. A
+// visible <img> can still be blank while its bytes load, and a screenshot of
+// that would become the baseline.
+// ---------------------------------------------------------------------------
+async function expectImagesLoaded(images: import("@playwright/test").Locator, count: number) {
+  await expect(images).toHaveCount(count);
+  await expect
+    .poll(
+      () =>
+        images.evaluateAll((els) =>
+          els.every((el) => el instanceof HTMLImageElement && el.complete && el.naturalWidth > 0),
+        ),
+      { message: "an image never finished loading", timeout: 10000 },
+    )
+    .toBe(true);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: what the QR preview is currently drawing, or null while it's blank.
+// qr-code-styling swaps in a fresh, empty canvas on every update and paints it
+// a moment later, so a blank canvas means "still drawing", not a result.
+// ---------------------------------------------------------------------------
+async function qrContent(qrCode: import("@playwright/test").Locator) {
+  return qrCode.evaluate((el) => {
+    if (!(el instanceof HTMLCanvasElement)) return el.outerHTML;
+    const blank = document.createElement("canvas");
+    blank.width = el.width;
+    blank.height = el.height;
+    const drawn = el.toDataURL();
+    return drawn === blank.toDataURL() ? null : drawn;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helper: wait until the QR preview has finished drawing something other than
+// `previous`, and return it. "Finished" means two polls in a row read the same
+// non-blank content.
+// ---------------------------------------------------------------------------
+async function settledQr(
+  qrCode: import("@playwright/test").Locator,
+  previous: string | null,
+  message: string,
+) {
+  let last: string | null = null;
+  let settled: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        const now = await qrContent(qrCode);
+        const ready = now !== null && now !== previous && now === last;
+        last = now;
+        if (ready) settled = now;
+        return ready;
+      },
+      { message, timeout: 10000 },
+    )
+    .toBe(true);
+  return settled as string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: take a themed screenshot pair (light + dark) for a given page state
 // ---------------------------------------------------------------------------
 async function takeThemedScreenshots(
@@ -334,13 +395,27 @@ test.describe("Visual Desktop (1280x720)", () => {
     await page.goto("/image/compress");
     await page.waitForLoadState("networkidle");
 
-    // Upload image and wait for auto-processing
+    // Compress doesn't run on upload: the default Target Size mode starts
+    // empty with the button disabled. Quality mode has a default, so pick it
+    // and run the tool.
     await uploadTestImage(page);
-    await page.waitForTimeout(1000);
+    await page.getByRole("button", { name: "Quality", exact: true }).click();
+    await page.getByTestId("compress-submit").click();
 
-    // Wait for the before-after slider to appear (indicates processing complete)
-    const slider = page.locator("[class*='before-after'], [class*='BeforeAfter']").first();
-    await slider.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+    // The comparison slider only mounts once the result is back. If it never
+    // does, fail here instead of screenshotting the upload state (#1861).
+    const slider = page.getByRole("slider", { name: "Before/after comparison slider" });
+    await expect(slider).toBeVisible({ timeout: 15000 });
+    const sliderImages = slider.locator("img");
+    await expectImagesLoaded(sliderImages, 2);
+    // Before and after must be different files, or the shot shows the
+    // original twice.
+    const [beforeSrc, afterSrc] = await sliderImages.evaluateAll((els) =>
+      els.map((el) => (el as HTMLImageElement).src),
+    );
+    expect(afterSrc, "the after image is the original, not the compressed result").not.toBe(
+      beforeSrc,
+    );
     await page.waitForTimeout(500);
 
     await takeThemedScreenshots(page, "tool-compress-result");
@@ -355,9 +430,14 @@ test.describe("Visual Desktop (1280x720)", () => {
     await uploadTestImage(page);
     await page.waitForTimeout(1000);
 
-    // Wait for the crop canvas to render
-    const canvas = page.locator("canvas").first();
-    await canvas.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    // The crop stage is react-image-crop over a plain <img>, not a canvas.
+    // Wait for the image to decode, the selection box to draw, and the info
+    // bar to read the original size (set from the image's onLoad).
+    const cropImage = page.getByRole("img", { name: "Crop preview" });
+    await expect(cropImage).toBeVisible({ timeout: 10000 });
+    await expectImagesLoaded(cropImage, 1);
+    await expect(page.locator(".ReactCrop__crop-selection")).toBeVisible();
+    await expect(page.getByText(/^Original: \d+ x \d+$/)).toBeVisible();
     await page.waitForTimeout(500);
 
     await takeThemedScreenshots(page, "tool-crop-canvas");
@@ -369,14 +449,16 @@ test.describe("Visual Desktop (1280x720)", () => {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(500);
 
-    // QR generate is a no-dropzone tool; enter text to generate a QR code
-    const textInput = page.getByTestId("qr-input-url");
-    await textInput.fill("https://snapotter.com");
-    await page.waitForTimeout(1000);
+    // The preview draws a placeholder QR before any input, so "a QR is
+    // visible" proves nothing. Record the finished placeholder, enter the URL,
+    // and wait for the preview to finish drawing something else (#1861).
+    const qrCode = page.getByTestId("qr-preview").locator("canvas, svg");
+    await expect(qrCode).toBeVisible({ timeout: 10000 });
+    const placeholder = await settledQr(qrCode, null, "the placeholder QR never finished drawing");
 
-    // Wait for QR preview to render
-    const preview = page.locator("img, canvas, svg").first();
-    await preview.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+    await page.getByTestId("qr-input-url").fill("https://snapotter.com");
+    await expect(page.getByText("Enter content to generate a QR code")).toBeHidden();
+    await settledQr(qrCode, placeholder, "the QR preview never redrew for the entered URL");
     await page.waitForTimeout(500);
 
     await takeThemedScreenshots(page, "tool-qr-generate-preview");
