@@ -58,3 +58,15 @@ describe("a failing request on a diagnostic instance, tracing on (#1880)", () =>
     for (const t of transactions) expectNoSecrets(t, REQUESTS.upload.secrets);
   });
 });
+
+describe("a failing request after analytics is switched off, tracing on, diagnostic instance (#1898)", () => {
+  it("sends nothing at all: no transaction, no error event, no other envelope", async () => {
+    const sent = await harness.sendOptedOut(REQUESTS.login.path, REQUESTS.login.init);
+    expect(sent).toEqual([]);
+  });
+
+  it("sends again once analytics is back on", async () => {
+    const { transactions } = await harness.send(REQUESTS.login.path, REQUESTS.login.init);
+    expect(transactions.length).toBeGreaterThan(0);
+  });
+});
