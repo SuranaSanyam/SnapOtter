@@ -41,10 +41,30 @@ afterEach(() => {
   submitFeedback.mockClear();
   trackFeedbackPromptShown.mockClear();
   trackFeedbackPromptDismissed.mockClear();
-  apiGet.mockClear();
+  // Reset, not clear: answerSettingsLater installs an implementation that a
+  // later test must not inherit.
+  apiGet.mockReset();
   apiPut.mockClear();
   useAuth.mockReset();
 });
+
+// Answers the settings read on a later macrotask, the way a loaded runner does.
+// A "stays hidden" check must survive that delay: asserting absence before the
+// read lands passes whether or not the overlay would have shown (#1802).
+function answerSettingsLater(settings: Record<string, string>) {
+  apiGet.mockImplementation(
+    () => new Promise((resolve) => setTimeout(() => resolve({ settings }), 20)),
+  );
+}
+
+// Absence only means something once the overlay has seen its settings: wait for
+// the read to resolve and for React to commit whatever it decided.
+async function settingsReadSettled() {
+  await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    await apiGet.mock.results[0]?.value;
+  });
+}
 
 function renderOverlay(initialPath = "/") {
   return render(
@@ -66,25 +86,27 @@ describe("UsageSurveyOverlay", () => {
 
   it("stays hidden until the instance's first processing has completed", async () => {
     useAuth.mockReturnValue({ role: "admin", mustChangePassword: false });
-    apiGet.mockResolvedValue({ settings: {} });
+    answerSettingsLater({});
 
     renderOverlay();
 
-    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    await settingsReadSettled();
     expect(screen.queryByText("How are you using SnapOtter?")).toBeNull();
     expect(trackFeedbackPromptShown).not.toHaveBeenCalled();
   });
 
   it("renders nothing once already answered or dismissed", async () => {
     useAuth.mockReturnValue({ role: "admin", mustChangePassword: false });
-    apiGet.mockResolvedValue({
-      settings: { ...PROCESSED, "onboarding.usageSurvey.dismissedAt": "2026-01-01T00:00:00Z" },
+    answerSettingsLater({
+      ...PROCESSED,
+      "onboarding.usageSurvey.dismissedAt": "2026-01-01T00:00:00Z",
     });
 
     renderOverlay();
 
-    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    await settingsReadSettled();
     expect(screen.queryByText("How are you using SnapOtter?")).toBeNull();
+    expect(trackFeedbackPromptShown).not.toHaveBeenCalled();
   });
 
   it("shows the telemetry-blind questions after processing and emits a shown event", async () => {
