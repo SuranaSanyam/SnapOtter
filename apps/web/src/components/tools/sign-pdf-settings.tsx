@@ -1,4 +1,4 @@
-import { SafeError } from "@snapotter/shared";
+import { type FeedbackErrorCategory, SafeError } from "@snapotter/shared";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { ResultDownloadLink } from "@/components/common/result-download-link";
@@ -258,6 +258,9 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
     // the PDF is being signed; a result written to the live selection would
     // land on a bystander entry and the signed file would go unguarded.
     const capturedIndex = useFileStore.getState().selectedIndex;
+    // Which file that index held, so a failure finds its own entry even after
+    // a reorder, and leaves alone a fresh file that took the slot.
+    const capturedEntryId = useFileStore.getState().entries[capturedIndex]?.id;
 
     setError(null);
     setDownloadUrl(null);
@@ -285,6 +288,48 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       useFileStore.getState().setProcessing(false);
     };
 
+    /**
+     * Ends a run that failed. Besides the panel's error and endRun, the
+     * failure goes on the run's own entry, so the thumbnail strip marks it
+     * failed and the page offers its report-issue button (#1969). `category`
+     * is for messages that are translated, which can't be classified from
+     * their text.
+     *
+     * Like use-tool-processor's endSyncRun, each write is guarded on its own
+     * and the entry write always runs: a store listener that throws while the
+     * run ends must not leave the entry pending. The first teardown error is
+     * rethrown after it, so it still surfaces; the entry write itself logs and
+     * reports instead of throwing. The entry is found by id, so a reorder or a
+     * fresh file in the slot can't redirect the failure, and only the
+     * "pending" the run reset it to is failed: an entry already holding this
+     * run's result keeps it.
+     */
+    const failRun = (message: string, category?: FeedbackErrorCategory) => {
+      let teardown: { cause: unknown } | null = null;
+      for (const write of [() => setError(message), endRun]) {
+        try {
+          write();
+        } catch (cause) {
+          teardown ??= { cause };
+        }
+      }
+      try {
+        const { entries, updateEntry } = useFileStore.getState();
+        const index = entries.findIndex((e) => e.id === capturedEntryId);
+        if (index !== -1 && entries[index].status === "pending") {
+          updateEntry(index, { status: "failed", error: message, errorCategory: category ?? null });
+        }
+      } catch (err) {
+        console.error("Failing the Sign PDF run's entry failed", err);
+        // The console alone never reaches Sentry (#1882).
+        void captureHandledError(
+          new SafeError("Failing a Sign PDF run's entry failed", { kind: "bug", cause: err }),
+          { error_class: "bug", tool_id: "sign-pdf" },
+        );
+      }
+      if (teardown) throw teardown.cause;
+    };
+
     const exported = await canvas.exportPlacements().catch((cause: unknown) => {
       // Without this the run never ends: the button stays disabled and the
       // navigation guard warns for as long as the page is open. Reported
@@ -297,8 +342,7 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       return null;
     });
     if (!exported) {
-      setError(sp.exportFailed);
-      endRun();
+      failRun(sp.exportFailed, "processing_error");
       return;
     }
     const { pngs, placements } = exported;
@@ -362,13 +406,18 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       },
       onFailed: (failure) => {
         abandonRequest();
-        setError(jobFailureMessage(failure, t.errors));
-        finish();
+        progressCleanupRef.current = null;
+        // A failure with a reason shows one of our translated messages; a
+        // server message is English and classifies from its text.
+        failRun(
+          jobFailureMessage(failure, t.errors),
+          "message" in failure ? undefined : "processing_error",
+        );
       },
       onStall: () => {
         abandonRequest();
-        setError(sp.stall);
-        finish();
+        progressCleanupRef.current = null;
+        failRun(sp.stall, "timeout");
       },
     });
     const stopProgress = subscription.stop;
@@ -409,57 +458,56 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
         try {
           result = parseResultBody<SignResult>(xhr.responseText);
         } catch (err) {
-          setError(t.errors.invalidResponse);
+          failRun(t.errors.invalidResponse, "processing_error");
           reportMalformedResult(err, { status: xhr.status, toolId: "sign-pdf" });
+          return;
         }
-        if (result) {
-          try {
-            landResult(result);
-          } catch (err) {
-            try {
-              setError(jobFailureMessage({ reason: "trackingFailed" }, t.errors));
-              endRun();
-            } catch (teardownErr) {
-              console.error("Ending the run after a result handling error failed", teardownErr);
-              // The console alone never reaches Sentry (#1882).
-              reportRunEndFailure(
-                "Ending a Sign PDF run after a result handling error failed",
-                teardownErr,
-                "sign-pdf",
-              );
-            }
-            throw err;
-          }
-        }
-      } else {
         try {
-          const b = JSON.parse(xhr.responseText);
-          setError(
-            typeof b.error === "string"
-              ? b.error
-              : typeof b.details === "string"
-                ? b.details
-                : format(t.errors.failedWithStatus, { status: xhr.status }),
-          );
-        } catch {
-          setError(format(t.errors.processingFailedWithStatus, { status: xhr.status }));
+          landResult(result);
+        } catch (err) {
+          try {
+            failRun(jobFailureMessage({ reason: "trackingFailed" }, t.errors), "processing_error");
+          } catch (teardownErr) {
+            console.error("Ending the run after a result handling error failed", teardownErr);
+            // The console alone never reaches Sentry (#1882).
+            reportRunEndFailure(
+              "Ending a Sign PDF run after a result handling error failed",
+              teardownErr,
+              "sign-pdf",
+            );
+          }
+          throw err;
         }
+        endRun();
+        return;
       }
-      endRun();
+      let message: string;
+      try {
+        const b = JSON.parse(xhr.responseText);
+        message =
+          typeof b.error === "string"
+            ? b.error
+            : typeof b.details === "string"
+              ? b.details
+              : format(t.errors.failedWithStatus, { status: xhr.status });
+      } catch {
+        message = format(t.errors.processingFailedWithStatus, { status: xhr.status });
+      }
+      // A proxy's 413 has no JSON body, so its message is the translated
+      // status line; the category is what says the upload was too big.
+      failRun(message, xhr.status === 413 ? "upload_error" : undefined);
     };
     xhr.onerror = () => {
       if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
-      setError(t.errors.network);
-      endRun();
+      failRun(t.errors.network, "upload_error");
     };
     xhr.ontimeout = () => {
       if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
-      setError(sp.timeout);
-      endRun();
+      failRun(sp.timeout, "timeout");
     };
     xhr.open("POST", appUrl("/api/v1/tools/pdf/sign-pdf"));
     formatHeaders().forEach((value, key) => {
