@@ -232,6 +232,7 @@ export function EraseObjectSettings({
     file: File,
     maskBlob: Blob,
     onProgress: (percent: number) => void,
+    onStoppable: (stop: () => void) => void,
   ): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
       const clientJobId = generateId();
@@ -269,6 +270,12 @@ export function EraseObjectSettings({
         onFailed: (failure) => abandon(new Error(jobFailureMessage(failure, t.errors))),
         onStall: () =>
           abandon(new FeedbackCategoryError(t.toolSettings["erase-object"].stallBatch, "timeout")),
+      });
+      // Drops this file where it stands. The error only settles the promise:
+      // the batch has already decided to write nothing more for it.
+      onStoppable(() => {
+        stopProgress();
+        abandon(new Error("Erase Object batch stopped"));
       });
 
       const maskFile = new File([maskBlob], "mask.png", { type: "image/png" });
@@ -569,6 +576,31 @@ export function EraseObjectSettings({
     }
     if (work.length === 0) return;
 
+    // Leaving for another tool resets the file store, and opening library
+    // files replaces it. Either way the batch's files are gone, so it stops
+    // there: the file in flight is dropped, no more are sent, and nothing is
+    // written to entries that now belong to someone else (#1894). This keys
+    // on the store rather than on unmount because the panel also unmounts
+    // whenever the mobile settings sheet closes, and that must not end the run.
+    const batchFiles = new Set(work.map((w) => w.file));
+    let filesGone = false;
+    let stopInFlight: (() => void) | null = null;
+    const unsubscribe = useFileStore.subscribe((state) => {
+      if (filesGone || state.entries.some((e) => batchFiles.has(e.file))) return;
+      filesGone = true;
+      // This runs inside whoever replaced the files (the tool page's reset,
+      // the library's setFiles): a throw here must not break their update.
+      try {
+        stopInFlight?.();
+      } catch (err) {
+        reportRunEndFailure(
+          "Stopping an Erase Object batch whose files left failed",
+          err,
+          "erase-object",
+        );
+      }
+    });
+
     // A store write that throws anywhere in here (#1354) ends the batch: a
     // store that can't record a file's outcome gets no more files sent to it.
     // The teardown below runs whatever threw, so the run can't stay at
@@ -587,6 +619,7 @@ export function EraseObjectSettings({
       }, 1000);
 
       for (let wi = 0; wi < work.length; wi++) {
+        if (filesGone) break;
         const { index, file, maskBlob } = work[wi];
         const basePercent = (wi / work.length) * 100;
         const sliceWeight = 100 / work.length;
@@ -603,15 +636,26 @@ export function EraseObjectSettings({
         useFileStore.getState().updateEntry(index, { status: "processing", error: null });
 
         try {
-          await processOneFile(index, file, maskBlob, (pct) => {
-            setProgressPercent(basePercent + (pct / 100) * sliceWeight);
-          });
+          await processOneFile(
+            index,
+            file,
+            maskBlob,
+            (pct) => {
+              setProgressPercent(basePercent + (pct / 100) * sliceWeight);
+            },
+            (stop) => {
+              stopInFlight = stop;
+            },
+          );
         } catch (err) {
+          if (filesGone) break;
           useFileStore.getState().updateEntry(index, {
             status: "failed",
             error: err instanceof Error ? err.message : t.errors.processingFailedNoDetail,
             errorCategory: feedbackCategoryOf(err),
           });
+        } finally {
+          stopInFlight = null;
         }
       }
     } catch (cause) {
@@ -626,9 +670,12 @@ export function EraseObjectSettings({
     const trackingFailed = jobFailureMessage({ reason: "trackingFailed" }, t.errors);
     let teardownError: { cause: unknown } | null = null;
     for (const teardown of [
+      unsubscribe,
       () => {
         if (elapsedRef.current) clearInterval(elapsedRef.current);
       },
+      // Still ours to clear when the files are gone: a replacing setFiles
+      // leaves it set, and nothing else can have started a run since.
       () => setProcessing(false),
       () => setProgressPhase("idle"),
       () => setProgressStage(null),

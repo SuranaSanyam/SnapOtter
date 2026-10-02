@@ -1083,3 +1083,142 @@ describe("erase-object single file: a run the progress stream gave up on (#1893)
     }
   });
 });
+
+describe("erase-object batch: leaving the page mid-batch (#1894)", () => {
+  beforeEach(() => {
+    useFileStore.getState().setFiles([image("one.png"), image("two.png"), image("three.png")]);
+  });
+
+  /** What the tool page does on the way out: a fresh store for the next tool. */
+  function moveToAnotherTool() {
+    act(() => {
+      useFileStore.getState().reset();
+      useFileStore.getState().setFiles([image("next-tool.png")]);
+    });
+  }
+
+  it("leaving for another tool stops the file in flight and sends no more", async () => {
+    const { unmount } = renderPanel(3);
+    const first = await submit(1);
+
+    unmount();
+    moveToAnotherTool();
+
+    expect(first.aborted).toBe(true);
+    expect(FakeEventSource.instances[0].readyState).toBe(2);
+    // Answered anyway: it lands nowhere, and no second file goes out.
+    first.respond(200, GOOD_BODY);
+    await act(async () => {});
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(entry(0).status).toBe("pending");
+    expect(entry(0).processedUrl).toBeNull();
+    expect(useFileStore.getState().processing).toBe(false);
+    expect(useFileStore.getState().error).toBeNull();
+  });
+
+  it("stops at the file in flight when the files go after one has finished", async () => {
+    renderPanel(3);
+    const first = await submit(1);
+    first.respond(200, GOOD_BODY);
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(2));
+    const second = FakeXhr.instances[1];
+
+    moveToAnotherTool();
+    second.respond(200, GOOD_BODY);
+    await act(async () => {});
+
+    expect(second.aborted).toBe(true);
+    expect(FakeEventSource.instances[1].readyState).toBe(2);
+    expect(FakeXhr.instances).toHaveLength(2);
+    expect(entry(0).status).toBe("pending");
+    expect(entry(0).processedUrl).toBeNull();
+  });
+
+  it("ends the run when library files replace the batch's without a reset", async () => {
+    const { unmount } = renderPanel(3);
+    const first = await submit(1);
+    expect(useFileStore.getState().processing).toBe(true);
+
+    // Erase Object, then the file library, then a library file opened in a
+    // tool: the store is replaced, never reset.
+    unmount();
+    act(() => useFileStore.getState().setFiles([image("from-library.png")]));
+    await act(async () => {});
+
+    expect(first.aborted).toBe(true);
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(useFileStore.getState().processing).toBe(false);
+    expect(entry(0).status).toBe("pending");
+  });
+
+  it("keeps going when only the panel unmounts, as the mobile settings sheet does", async () => {
+    const { unmount } = renderPanel(3);
+    const first = await submit(1);
+
+    unmount();
+    first.respond(200, GOOD_BODY);
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(2));
+    FakeXhr.instances[1].respond(200, GOOD_BODY);
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(3));
+    FakeXhr.instances[2].respond(200, GOOD_BODY);
+    await waitFor(() => expect(useFileStore.getState().processing).toBe(false));
+
+    expect(first.aborted).toBe(false);
+    expect(entry(0).status).toBe("completed");
+    expect(entry(1).status).toBe("completed");
+    expect(entry(2).status).toBe("completed");
+  });
+
+  it("keeps going when more files are added mid-batch", async () => {
+    renderPanel(3);
+    const first = await submit(1);
+
+    act(() => useFileStore.getState().addFiles([image("four.png")]));
+    first.respond(200, GOOD_BODY);
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(2));
+    FakeXhr.instances[1].respond(200, GOOD_BODY);
+    await waitFor(() => expect(FakeXhr.instances).toHaveLength(3));
+    FakeXhr.instances[2].respond(200, GOOD_BODY);
+    await waitFor(() => expect(useFileStore.getState().processing).toBe(false));
+
+    expect(first.aborted).toBe(false);
+    expect(entry(2).status).toBe("completed");
+    expect(entry(3).status).toBe("pending");
+  });
+
+  it("reports a throw while stopping instead of breaking the reset that caused it", async () => {
+    renderPanel(3);
+    const first = await submit(1);
+    vi.spyOn(first, "abort").mockImplementation(() => {
+      throw new Error("abort blew up");
+    });
+
+    expect(() => moveToAnotherTool()).not.toThrow();
+    await act(async () => {});
+
+    expect(entry(0).file.name).toBe("next-tool.png");
+    expect(vi.mocked(captureHandledError)).toHaveBeenCalledTimes(1);
+    const [error, tags] = vi.mocked(captureHandledError).mock.calls[0];
+    expect(error.message).toBe("Stopping an Erase Object batch whose files left failed");
+    expect(tags).toEqual({ error_class: "bug", tool_id: "erase-object" });
+  });
+
+  it("sends nothing more when the files go just as a file finishes", async () => {
+    renderPanel(3);
+    const first = await submit(1);
+
+    // Same tick: the loop only learns of it before the next file.
+    act(() => {
+      first.status = 200;
+      first.responseText = JSON.stringify(GOOD_BODY);
+      first.onload?.();
+      useFileStore.getState().reset();
+      useFileStore.getState().setFiles([image("next-tool.png")]);
+    });
+    await act(async () => {});
+
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(useFileStore.getState().processing).toBe(false);
+    expect(entry(0).status).toBe("pending");
+  });
+});
