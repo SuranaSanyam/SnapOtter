@@ -13,6 +13,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,6 +128,13 @@ function mainChangesAWorkflow(seed: string): string {
   return git(seed, "rev-parse", "HEAD");
 }
 
+/** What an all-mode run does to a baseline whose render didn't change. */
+function rewriteUntouchedWithSameBytes(ctx: ReturnType<typeof setup>) {
+  write(ctx.work, UNTOUCHED, "crop");
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(join(ctx.work, UNTOUCHED), later, later);
+}
+
 function run(ctx: ReturnType<typeof setup>, args: string[], env: Record<string, string> = {}) {
   const summary = join(ctx.dir, "summary.md");
   const output = join(ctx.dir, "output.txt");
@@ -143,6 +151,8 @@ function run(ctx: ReturnType<typeof setup>, args: string[], env: Record<string, 
       SOURCE_REF: "main",
       RETRY_DELAY: "0",
       ARTIFACT_NAME: ARTIFACT,
+      // The developer's shell must not pick the PR body's mode.
+      UPDATE_SNAPSHOTS: "",
       ...env,
     },
   });
@@ -208,6 +218,19 @@ describe("visual-baselines-pr.sh collect", () => {
     expect(readFileSync(join(staging, accented), "utf8")).toBe("cafe");
     expect(pushed.status, pushed.stderr).toBe(0);
     expect(branchFiles(ctx)).toEqual([ADDED, CHANGED, ignored, accented].sort());
+  });
+
+  it("leaves out a baseline rewritten with the same bytes", () => {
+    // --update-snapshots=all refreshes any baseline whose bytes differ
+    // (#1705), so the PR must carry only content changes: a same-bytes
+    // rewrite or a bare timestamp change stays out.
+    const ctx = setup();
+    rewriteUntouchedWithSameBytes(ctx);
+    const { staging, listed, result } = collect(ctx);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect([...listed].sort()).toEqual([ADDED, CHANGED].sort());
+    expect(existsSync(join(staging, UNTOUCHED))).toBe(false);
   });
 
   it("reports zero when the run changed nothing", () => {
@@ -341,6 +364,26 @@ exec "${realGit}" "$@"`,
     expect(git(ctx.origin, "branch", "--list", BRANCH)).toBe("");
   });
 
+  it("says in the PR body that a changed-mode run skips stale baselines under the budget", () => {
+    const ctx = setup();
+    const { pushed } = collectAndPush(ctx);
+
+    expect(pushed.status, pushed.stderr).toBe(0);
+    expect(pushed.gh).toContain("Mode `changed`");
+    expect(pushed.gh).toContain("update_snapshots: all");
+  });
+
+  it("says in the PR body that an all-mode run refreshed every baseline", () => {
+    const ctx = setup();
+    rewriteUntouchedWithSameBytes(ctx);
+    const { pushed } = collectAndPush(ctx, { UPDATE_SNAPSHOTS: "all" });
+
+    expect(pushed.status, pushed.stderr).toBe(0);
+    expect(pushed.gh).toContain("Mode `all`");
+    expect(pushed.gh).not.toContain("update_snapshots: all");
+    expect(branchFiles(ctx)).toEqual([ADDED, CHANGED].sort());
+  });
+
   it("opens a draft PR when the regenerate step failed", () => {
     const ctx = setup();
     const { pushed } = collectAndPush(ctx, { REGENERATE_OUTCOME: "failure" });
@@ -393,12 +436,18 @@ interface Step {
 /** A GitHub Actions expression as it appears in the workflow source. */
 const expr = (inner: string) => `$\{{ ${inner} }}`;
 
+interface DispatchInput {
+  type?: string;
+  options?: string[];
+  default?: string;
+}
+
 describe("update-visual-baselines.yml", () => {
-  const job = (
-    load(readFileSync(WORKFLOW, "utf8")) as {
-      jobs: Record<string, { steps: Step[]; env?: Record<string, string> }>;
-    }
-  ).jobs["update-baselines"];
+  const workflow = load(readFileSync(WORKFLOW, "utf8")) as {
+    on: { workflow_dispatch: { inputs?: Record<string, DispatchInput> } | null };
+    jobs: Record<string, { steps: Step[]; env?: Record<string, string> }>;
+  };
+  const job = workflow.jobs["update-baselines"];
   const steps = job.steps;
   const find = (predicate: (step: Step) => boolean) => {
     const at = steps.findIndex(predicate);
@@ -422,6 +471,34 @@ describe("update-visual-baselines.yml", () => {
     // With continue-on-error, `conclusion` always reads success; only
     // `outcome` carries the failure into the PR.
     expect(steps[push].env?.REGENERATE_OUTCOME).toBe(expr("steps.regenerate.outcome"));
+  });
+
+  it("lets a dispatch ask for every baseline, not only the failing ones (#1705)", () => {
+    // changed mode never rewrites a stale baseline that still passes the
+    // maxDiffPixelRatio budget; all mode rewrites any whose bytes differ.
+    const input = workflow.on.workflow_dispatch?.inputs?.update_snapshots;
+    expect(input?.type).toBe("choice");
+    expect(input?.options).toEqual(["changed", "all"]);
+    expect(input?.default).toBe("changed");
+
+    // One job-level value feeds both the run and the PR body, so the body
+    // can't name a mode the run didn't use.
+    expect(job.env?.UPDATE_SNAPSHOTS).toBe(expr("inputs.update_snapshots || 'changed'"));
+    expect(steps.filter((step) => step.env?.UPDATE_SNAPSHOTS !== undefined)).toEqual([]);
+    expect(steps[regenerate].run).toContain('"--update-snapshots=$UPDATE_SNAPSHOTS"');
+    // The input reaches the shell through env, never spliced into the script.
+    expect(steps[regenerate].run).not.toContain("inputs.");
+    // A bare --update-snapshots means changed, whatever the input says.
+    expect(steps[regenerate].run).not.toMatch(/--update-snapshots(?!=)/);
+  });
+
+  it("describes every mode the input offers in the PR body", () => {
+    const options = workflow.on.workflow_dispatch?.inputs?.update_snapshots?.options ?? [];
+    const script = readFileSync(SCRIPT, "utf8");
+    for (const option of options) {
+      expect(script).toContain(`    ${option})\n`);
+      expect(script).toContain(`Mode \\\`${option}\\\`:`);
+    }
   });
 
   it("runs exactly the projects that write @visual baselines", () => {
