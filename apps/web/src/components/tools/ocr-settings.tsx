@@ -13,6 +13,7 @@ import {
   failedFrameMessage,
   type ProgressFrame,
 } from "@/lib/progress-frames";
+import { reportRunEndFailure } from "@/lib/run-end-report";
 import { copyToClipboard, generateId } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
 import { type OcrQuality, OcrQualityControl, useOcrQuality } from "./ocr-quality-control";
@@ -44,6 +45,8 @@ export function ocrOneFile(
   callbacks: {
     onUploadProgress: (pct: number) => void;
     onProcessingProgress: (pct: number, stage: string) => void;
+    /** Gets a stop that drops the file where it stands: request, stream and stall timer. */
+    onStoppable?: (stop: () => void) => void;
   },
   messages: {
     timeout?: string;
@@ -80,8 +83,13 @@ export function ocrOneFile(
     const rejectOnce = (error: Error) => {
       if (settled) return;
       settled = true;
-      cleanup();
-      reject(error);
+      // A throw while closing the stream must still settle the file, or a
+      // stopped scan would wait on it forever.
+      try {
+        cleanup();
+      } finally {
+        reject(error);
+      }
     };
 
     const armStallTimer = () => {
@@ -190,6 +198,13 @@ export function ocrOneFile(
     xhr.onerror = () => rejectOnce(new Error(messages.networkError ?? "Network error"));
     xhr.ontimeout = () => rejectOnce(new Error(messages.timeout ?? "OCR request timed out"));
     xhr.onabort = () => rejectOnce(new Error(messages.processingFailed ?? "OCR request canceled"));
+    // Settling first closes the stream and the stall timer, and covers a file
+    // the server already took async, whose XHR is done and won't abort. The
+    // error never reaches the UI: the scan writes nothing more for this file.
+    callbacks.onStoppable?.(() => {
+      rejectOnce(new Error("OCR scan stopped"));
+      xhr.abort();
+    });
     xhr.open("POST", appUrl("/api/v1/tools/image/ocr"));
     for (const [key, value] of formatHeaders()) {
       xhr.setRequestHeader(key, value);
@@ -221,7 +236,8 @@ export function OcrSettings() {
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Leaving mid-scan stops the elapsed counter; the scan itself still settles.
+  // Unmounting stops the elapsed counter. The scan itself stops only once its
+  // files leave the store (see handleProcess).
   useEffect(
     () => () => {
       if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -265,67 +281,107 @@ export function OcrSettings() {
     const results: string[] = [];
     const errors: string[] = [];
 
-    for (let i = 0; i < total; i++) {
-      const file = files[i];
-      const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
-      // Each file gets an equal share of the 0-100 progress bar
-      const fileBase = (i / total) * 100;
-      const fileShare = 100 / total;
-
-      // Only a single-file run auto-saves to the library; a multi-file batch
-      // never sends a fileId (matching the standard batch processor).
-      const serverFileId =
-        total === 1 ? useFileStore.getState().entries[i]?.serverFileId : undefined;
-      const library = serverFileId
-        ? { fileId: serverFileId, saveMode: useFileStore.getState().librarySaveMode }
-        : undefined;
-
+    // Leaving for another tool resets the file store, and opening library
+    // files replaces it. Either way the scan's files are gone, so it stops
+    // there: the file in flight is dropped (request, progress stream and stall
+    // timer) and no more files are sent (#1932). This keys on the store rather
+    // than on unmount because the panel also unmounts whenever the mobile
+    // settings sheet closes, and that must not end the scan.
+    const runFiles = new Set(files);
+    let filesGone = false;
+    let stopInFlight: (() => void) | null = null;
+    const unsubscribe = useFileStore.subscribe((state) => {
+      if (filesGone || state.files.some((f) => runFiles.has(f))) return;
+      filesGone = true;
+      // This runs inside whoever replaced the files (the tool page's reset,
+      // the library's setFiles): a throw here must not break their update.
       try {
-        const { text, savedFileId } = await ocrOneFile(
-          file,
-          settings,
-          {
-            onUploadProgress: (pct) => {
-              setProgressPhase("uploading");
-              setProgressPercent(fileBase + (pct / 100) * fileShare * 0.15);
-              setProgressStage(`${prefix}Uploading...`);
-            },
-            onProcessingProgress: (pct, stage) => {
-              setProgressPhase("processing");
-              setProgressPercent(fileBase + fileShare * 0.15 + (pct / 100) * fileShare * 0.85);
-              setProgressStage(`${prefix}${stage}`);
-            },
-          },
-          {
-            timeout: t.errors.timeout,
-            networkError: t.errors.networkError,
-            processingFailed: t.errors.processingFailed,
-            t,
-          },
-          library,
-        );
-        // Only single-file runs send a fileId, so savedFileId is single-file only.
-        if (savedFileId) {
-          setSavedLibraryFileId(savedFileId);
-          useFileStore.getState().setLastSavedLibraryFileId(savedFileId);
-        }
-        results.push(
-          total > 1
-            ? `--- ${file.name} ---\n${text || t.toolSettings.ocr.noTextDetectedInline}`
-            : text,
-        );
+        stopInFlight?.();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${file.name}: ${msg}`);
-        results.push(
-          total > 1
-            ? `--- ${file.name} ---\n${format(t.toolSettings.ocr.fileErrorInline, { message: msg })}`
-            : "",
-        );
+        reportRunEndFailure("Stopping an OCR scan whose files left failed", err, "ocr");
       }
+    });
+
+    try {
+      for (let i = 0; i < total; i++) {
+        if (filesGone) break;
+        const file = files[i];
+        const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
+        // Each file gets an equal share of the 0-100 progress bar
+        const fileBase = (i / total) * 100;
+        const fileShare = 100 / total;
+
+        // Only a single-file run auto-saves to the library; a multi-file batch
+        // never sends a fileId (matching the standard batch processor).
+        const serverFileId =
+          total === 1 ? useFileStore.getState().entries[i]?.serverFileId : undefined;
+        const library = serverFileId
+          ? { fileId: serverFileId, saveMode: useFileStore.getState().librarySaveMode }
+          : undefined;
+
+        try {
+          const { text, savedFileId } = await ocrOneFile(
+            file,
+            settings,
+            {
+              onUploadProgress: (pct) => {
+                setProgressPhase("uploading");
+                setProgressPercent(fileBase + (pct / 100) * fileShare * 0.15);
+                setProgressStage(`${prefix}Uploading...`);
+              },
+              onProcessingProgress: (pct, stage) => {
+                setProgressPhase("processing");
+                setProgressPercent(fileBase + fileShare * 0.15 + (pct / 100) * fileShare * 0.85);
+                setProgressStage(`${prefix}${stage}`);
+              },
+              onStoppable: (stop) => {
+                stopInFlight = stop;
+              },
+            },
+            {
+              timeout: t.errors.timeout,
+              networkError: t.errors.networkError,
+              processingFailed: t.errors.processingFailed,
+              t,
+            },
+            library,
+          );
+          // Only single-file runs send a fileId, so savedFileId is single-file only.
+          if (savedFileId) {
+            setSavedLibraryFileId(savedFileId);
+            useFileStore.getState().setLastSavedLibraryFileId(savedFileId);
+          }
+          results.push(
+            total > 1
+              ? `--- ${file.name} ---\n${text || t.toolSettings.ocr.noTextDetectedInline}`
+              : text,
+          );
+        } catch (err) {
+          if (filesGone) break;
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${file.name}: ${msg}`);
+          results.push(
+            total > 1
+              ? `--- ${file.name} ---\n${format(t.toolSettings.ocr.fileErrorInline, { message: msg })}`
+              : "",
+          );
+        } finally {
+          stopInFlight = null;
+        }
+      }
+    } finally {
+      unsubscribe();
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
 
-    if (elapsedRef.current) clearInterval(elapsedRef.current);
+    // The text and errors belong to files that are no longer there. The
+    // processing flag is still ours to clear: a replacing setFiles leaves it
+    // set, and nothing else can have started a run since.
+    if (filesGone) {
+      setProcessing(false);
+      setProgressPhase("idle");
+      return;
+    }
 
     if (errors.length === total) {
       setError(errors.join("; "));

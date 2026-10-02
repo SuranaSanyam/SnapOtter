@@ -12,6 +12,7 @@ import {
   MalformedResultError,
   reportMalformedResult,
 } from "@/lib/progress-frames";
+import { reportRunEndFailure } from "@/lib/run-end-report";
 import { copyToClipboard } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
 
@@ -118,13 +119,15 @@ function parseBarcodeAnswer(text: string): BarcodeReadAnswer {
  * an answer that isn't one is the server's fault, and it gets reported
  * (#1740). A throw from `land` is our own store write failing: it fails the
  * file with the tracking message and is rethrown so it still surfaces (#1795,
- * after #1354).
+ * after #1354). `onStoppable` gets a stop that drops the request where it
+ * stands.
  */
 function scanOneFile(
   file: File,
   tryHarder: boolean,
   onUploadProgress: (pct: number) => void,
   land: (answer: BarcodeReadAnswer) => void,
+  onStoppable: (stop: () => void) => void,
   t: TranslationKeys,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -139,7 +142,12 @@ function scanOneFile(
       if (e.lengthComputable) onUploadProgress((e.loaded / e.total) * 100);
     };
 
+    // Set once the scan stops: an answer arriving after that, from a request
+    // the abort didn't reach, must not land on entries that aren't ours.
+    let stopped = false;
+
     xhr.onload = () => {
+      if (stopped) return;
       if (xhr.status >= 200 && xhr.status < 300) {
         let answer: BarcodeReadAnswer;
         try {
@@ -182,6 +190,13 @@ function scanOneFile(
     };
     xhr.onerror = () => reject(new Error(t.errors.network));
     xhr.ontimeout = () => reject(new Error(t.errors.requestTimedOut));
+    // The error only settles the promise and never reaches the UI: the scan
+    // has already decided to write nothing more for this file.
+    onStoppable(() => {
+      stopped = true;
+      reject(new Error("Barcode scan stopped"));
+      xhr.abort();
+    });
 
     xhr.open("POST", appUrl("/api/v1/tools/image/barcode-read"));
     for (const [key, value] of formatHeaders()) {
@@ -206,7 +221,8 @@ export function BarcodeReadSettings() {
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Leaving mid-scan stops the elapsed counter; the scan itself still settles.
+  // Unmounting stops the elapsed counter. The scan itself stops only once its
+  // files leave the store (see handleProcess).
   useEffect(
     () => () => {
       if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -235,55 +251,96 @@ export function BarcodeReadSettings() {
     const errors: string[] = [];
     const { updateEntry } = useFileStore.getState();
 
-    for (let i = 0; i < total; i++) {
-      const file = files[i];
-      const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
-      const fileBase = (i / total) * 100;
-      const fileShare = 100 / total;
-
+    // Leaving for another tool resets the file store, and opening library
+    // files replaces it. Either way the scan's files are gone, so it stops
+    // there: the request in flight is dropped, no more files are sent, and
+    // nothing is written to entries that now belong to someone else (#1932).
+    // This keys on the store rather than on unmount because the panel also
+    // unmounts whenever the mobile settings sheet closes, and that must not
+    // end the scan.
+    const runFiles = new Set(files);
+    let filesGone = false;
+    let stopInFlight: (() => void) | null = null;
+    const unsubscribe = useFileStore.subscribe((state) => {
+      if (filesGone || state.files.some((f) => runFiles.has(f))) return;
+      filesGone = true;
+      // This runs inside whoever replaced the files (the tool page's reset,
+      // the library's setFiles): a throw here must not break their update.
       try {
-        setProgressStage(
-          `${prefix}${format(t.toolSettings["barcode-read"].scanningFile, { name: file.name })}`,
-        );
-
-        await scanOneFile(
-          file,
-          tryHarder,
-          (pct) => {
-            setProgressPhase("uploading");
-            setProgressPercent(fileBase + (pct / 100) * fileShare * 0.5);
-          },
-          (answer) => {
-            setProgressPhase("processing");
-            setProgressPercent(fileBase + fileShare);
-
-            allResults.push({
-              filename: answer.filename,
-              barcodes: answer.barcodes,
-            });
-
-            // Set annotated image as processedUrl for before/after view
-            if (answer.annotatedUrl) {
-              updateEntry(i, {
-                processedUrl: answer.annotatedUrl,
-                processedPreviewUrl: answer.annotatedUrl,
-                processedFilename: `annotated-${file.name.replace(/\.[^.]+$/, "")}.png`,
-                status: "completed",
-                processedSize: null,
-              });
-            }
-          },
-          t,
-        );
+        stopInFlight?.();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${file.name}: ${msg}`);
-        // A throw while landing comes after this file's barcodes went in.
-        if (allResults.length === i) allResults.push({ filename: file.name, barcodes: [] });
+        reportRunEndFailure("Stopping a barcode scan whose files left failed", err, "barcode-read");
       }
+    });
+
+    try {
+      for (let i = 0; i < total; i++) {
+        if (filesGone) break;
+        const file = files[i];
+        const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
+        const fileBase = (i / total) * 100;
+        const fileShare = 100 / total;
+
+        try {
+          setProgressStage(
+            `${prefix}${format(t.toolSettings["barcode-read"].scanningFile, { name: file.name })}`,
+          );
+
+          await scanOneFile(
+            file,
+            tryHarder,
+            (pct) => {
+              setProgressPhase("uploading");
+              setProgressPercent(fileBase + (pct / 100) * fileShare * 0.5);
+            },
+            (answer) => {
+              setProgressPhase("processing");
+              setProgressPercent(fileBase + fileShare);
+
+              allResults.push({
+                filename: answer.filename,
+                barcodes: answer.barcodes,
+              });
+
+              // Set annotated image as processedUrl for before/after view
+              if (answer.annotatedUrl) {
+                updateEntry(i, {
+                  processedUrl: answer.annotatedUrl,
+                  processedPreviewUrl: answer.annotatedUrl,
+                  processedFilename: `annotated-${file.name.replace(/\.[^.]+$/, "")}.png`,
+                  status: "completed",
+                  processedSize: null,
+                });
+              }
+            },
+            (stop) => {
+              stopInFlight = stop;
+            },
+            t,
+          );
+        } catch (err) {
+          if (filesGone) break;
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${file.name}: ${msg}`);
+          // A throw while landing comes after this file's barcodes went in.
+          if (allResults.length === i) allResults.push({ filename: file.name, barcodes: [] });
+        } finally {
+          stopInFlight = null;
+        }
+      }
+    } finally {
+      unsubscribe();
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
 
-    if (elapsedRef.current) clearInterval(elapsedRef.current);
+    // The results and errors belong to files that are no longer there. The
+    // processing flag is still ours to clear: a replacing setFiles leaves it
+    // set, and nothing else can have started a run since.
+    if (filesGone) {
+      setProcessing(false);
+      setProgressPhase("idle");
+      return;
+    }
 
     if (errors.length === total) {
       setError(errors.join("; "));
