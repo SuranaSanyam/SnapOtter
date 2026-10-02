@@ -1,27 +1,67 @@
+import { errors } from "@playwright/test";
 import { expect, expectNoPinnedSection, openSettings, test, uploadTestImage } from "./helpers";
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 // ---------------------------------------------------------------------------
-// Helper: toggle theme and wait for CSS transition to settle
+// Helper: fail unless the page is showing the given theme. The app marks dark
+// mode with a `dark` class on <html> and nothing else, so that class is the
+// only reliable signal. Call it right before every themed screenshot: without
+// it a theme switch that silently did nothing gets screenshotted as the other
+// theme, and a freshly written baseline stores the wrong theme for good.
+// ---------------------------------------------------------------------------
+async function expectTheme(
+  page: import("@playwright/test").Page,
+  theme: "light" | "dark",
+  detail?: string,
+) {
+  const html = page.locator("html");
+  const base =
+    theme === "dark"
+      ? "expected the dark theme (html.dark), but the page is still light, so a dark screenshot would capture the light theme"
+      : "expected the light theme (no html.dark), but the page is still dark, so a light screenshot would capture the dark theme";
+  const message = detail ? `${base} (${detail})` : base;
+  if (theme === "dark") {
+    await expect(html, message).toHaveClass(/\bdark\b/);
+  } else {
+    await expect(html, message).not.toHaveClass(/\bdark\b/);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: toggle theme, check it applied, and wait for CSS transition to settle
 // ---------------------------------------------------------------------------
 async function setTheme(page: import("@playwright/test").Page, theme: "light" | "dark") {
   const isDark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
   const wantDark = theme === "dark";
+  let detail: string | undefined;
   if (isDark !== wantDark) {
     // The toggle lives in the top nav. On pages without it (login) or when a
-    // dialog overlay covers it (settings, help), the click is not actionable,
-    // so fall back to the global mod+shift+d shortcut.
+    // dialog overlay covers it (settings, help), the click times out, so fall
+    // back to the global mod+shift+d shortcut. Any other click error is a real
+    // failure and propagates. The app ignores that shortcut while an input,
+    // textarea, or select has focus, so the switch can still fail; expectTheme
+    // below catches that and names what had focus.
     const clicked = await page
       .locator("button[title='Toggle theme']")
       .click({ timeout: 1000 })
       .then(() => true)
-      .catch(() => false);
-    if (!clicked) {
+      .catch((err: unknown) => {
+        if (err instanceof errors.TimeoutError) return false;
+        throw err;
+      });
+    if (clicked) {
+      detail = "switched with the nav toggle";
+    } else {
+      const focused = await page.evaluate(
+        () => document.activeElement?.tagName.toLowerCase() ?? "nothing",
+      );
       await page.keyboard.press(`${MOD}+Shift+d`);
+      detail = `toggle not clickable, pressed ${MOD}+Shift+D with focus on <${focused}>`;
     }
     await page.waitForTimeout(300);
   }
+  await expectTheme(page, theme, detail);
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +119,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       const mask = await rotatingPhraseMask(page);
 
       // Light screenshot
+      await expectTheme(page, "light");
       await expect(page).toHaveScreenshot("desktop-login-empty-light.png", {
         fullPage: false,
         mask,
@@ -87,6 +128,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       // Toggle to dark via keyboard shortcut (login page may lack footer toggle)
       await page.keyboard.press(`${MOD}+Shift+d`);
       await page.waitForTimeout(300);
+      await expectTheme(page, "dark");
 
       await expect(page).toHaveScreenshot("desktop-login-empty-dark.png", {
         fullPage: false,
@@ -110,6 +152,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       await expect(page.getByText(/invalid|incorrect|failed/i).first()).toBeVisible();
 
       // Light screenshot with error
+      await expectTheme(page, "light");
       await expect(page).toHaveScreenshot("desktop-login-error-light.png", {
         fullPage: false,
         mask,
@@ -118,6 +161,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       // Toggle to dark
       await page.keyboard.press(`${MOD}+Shift+d`);
       await page.waitForTimeout(300);
+      await expectTheme(page, "dark");
 
       await expect(page).toHaveScreenshot("desktop-login-error-dark.png", {
         fullPage: false,
@@ -367,6 +411,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       await page.waitForTimeout(500);
 
       // Light screenshot
+      await expectTheme(page, "light");
       await expect(page).toHaveScreenshot("desktop-privacy-policy-light.png", {
         fullPage: false,
       });
@@ -374,6 +419,7 @@ test.describe("Visual Desktop (1280x720)", () => {
       // Toggle to dark
       await page.keyboard.press(`${MOD}+Shift+d`);
       await page.waitForTimeout(300);
+      await expectTheme(page, "dark");
 
       await expect(page).toHaveScreenshot("desktop-privacy-policy-dark.png", {
         fullPage: false,
@@ -487,10 +533,8 @@ test.describe("Visual Desktop (1280x720)", () => {
     // Dark theme: setTheme clicks the nav toggle, which takes focus, so focus
     // the search bar again after the switch. Without this the dark shot shows
     // the search box unfocused (#1527). The focus ring was under the old 1%
-    // pixel tolerance, so the screenshot alone did not notice. setTheme's shortcut
-    // fallback is ignored while the input has focus, so check the theme too.
+    // pixel tolerance, so the screenshot alone did not notice.
     await setTheme(page, "dark");
-    await expect(page.locator("html")).toHaveClass(/\bdark\b/);
     await page.keyboard.press(`${MOD}+k`);
     await expect(search).toBeFocused();
     await page.waitForTimeout(300);
