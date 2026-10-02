@@ -24,7 +24,10 @@
  *     post_logout_redirect_uri under a BASE_PATH prefix (#1355), and the
  *     line between an expected local-only logout (no ID token, OIDC off, no
  *     end_session_endpoint) and a fault building the URL, which must still
- *     log the user out but reach reportError (#1514).
+ *     log the user out but reach reportError (#1514). A cold discovery cache
+ *     (an API restart, or a second replica) must discover on demand rather
+ *     than skip the IdP logout, and a failed or slow discovery there must be
+ *     reported while the local logout still goes through (#1787).
  *
  * Like oidc-mfa-callback.test.ts, the cryptographic token exchange is mocked
  * at the `openid-client` boundary (only `authorizationCodeGrant`; discovery,
@@ -38,7 +41,7 @@
  * `authorizationCodeGrant` there would break its existing token-exchange
  * assertions.
  */
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { sign } from "@fastify/cookie";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -95,6 +98,7 @@ const { db, schema } = await import("../../../apps/api/src/db/index.js");
 const { sanitizeUsername, UsernameRaceExhaustedError } = await import(
   "../../../apps/api/src/lib/external-auth-resolver.js"
 );
+const { classifyError } = await import("../../../apps/api/src/lib/error-report.js");
 const mfaModule = await import("../../../apps/api/src/plugins/mfa.js");
 const oidcModule = await import("../../../apps/api/src/plugins/oidc.js");
 const { getOidcEndSessionEndpoint } = oidcModule;
@@ -200,6 +204,12 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
   let oidcApp: TestApp;
   let mockServer: Server;
   let mockPort: number;
+  // Discovery-document fetches the mock IdP has answered, so a logout test can
+  // tell an on-demand discovery from a cache hit (#1787).
+  let discoveryRequests = 0;
+  // Requests under /hang/ get no answer, standing in for an IdP that accepts
+  // the connection and never replies. The test answers them in its finally.
+  const hungResponses: ServerResponse[] = [];
 
   const origOidcEnabled = env.OIDC_ENABLED;
   const origExternalUrl = env.EXTERNAL_URL;
@@ -232,7 +242,26 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
 
   beforeAll(async () => {
     mockServer = createServer((req, res) => {
+      if (req.url?.startsWith("/hang/")) {
+        hungResponses.push(res);
+        return;
+      }
+      // A provider that advertises no end_session_endpoint (#1787).
+      if (req.url === "/noend/.well-known/openid-configuration") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            issuer: `http://localhost:${mockPort}/noend`,
+            authorization_endpoint: `http://localhost:${mockPort}/authorize`,
+            token_endpoint: `http://localhost:${mockPort}/token`,
+            jwks_uri: `http://localhost:${mockPort}/jwks`,
+            response_types_supported: ["code"],
+          }),
+        );
+        return;
+      }
       if (req.url === "/.well-known/openid-configuration") {
+        discoveryRequests++;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -431,7 +460,7 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
     const sub = `sub-warm-${Math.random().toString(36).slice(2, 10)}`;
     const login = await callbackWithClaims({ sub, preferred_username: sub });
     expect(login.headers.location).toBe(`${env.BASE_PATH}/`);
-    expect(getOidcEndSessionEndpoint()).toBe(`http://localhost:${mockPort}/logout`);
+    expect(await getOidcEndSessionEndpoint()).toBe(`http://localhost:${mockPort}/logout`);
     const sessionToken = login.cookies.find((c) => c.name === "snapotter-session")?.value;
     if (!sessionToken) throw new Error("callback set no snapotter-session cookie");
     return sessionToken;
@@ -500,7 +529,7 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
 
   it("omits logoutUrl without reporting when discovery advertises no end_session_endpoint", async () => {
     const sessionToken = await oidcSessionWithWarmCache();
-    const spy = vi.spyOn(oidcModule, "getOidcEndSessionEndpoint").mockReturnValue(null);
+    const spy = vi.spyOn(oidcModule, "getOidcEndSessionEndpoint").mockResolvedValue(null);
     try {
       const res = await logoutWithSession(sessionToken);
 
@@ -518,9 +547,7 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
   it("still logs out locally and reports the fault when building the IdP logout URL throws (#1514)", async () => {
     const sessionToken = await oidcSessionWithWarmCache();
     const fault = new Error("simulated serverMetadata fault");
-    const spy = vi.spyOn(oidcModule, "getOidcEndSessionEndpoint").mockImplementation(() => {
-      throw fault;
-    });
+    const spy = vi.spyOn(oidcModule, "getOidcEndSessionEndpoint").mockRejectedValue(fault);
     try {
       const res = await logoutWithSession(sessionToken);
 
@@ -537,6 +564,157 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
       spy.mockRestore();
     }
   });
+
+  async function expectSessionGone(sessionToken: string) {
+    const [session] = await db
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, sessionToken));
+    expect(session).toBeUndefined();
+  }
+
+  it("builds logoutUrl from a warm discovery cache without asking the IdP again", async () => {
+    const sessionToken = await oidcSessionWithWarmCache();
+    const before = discoveryRequests;
+
+    const res = await logoutWithSession(sessionToken);
+
+    expect(res.statusCode).toBe(200);
+    const logoutUrl = new URL(res.json().logoutUrl);
+    expect(`${logoutUrl.origin}${logoutUrl.pathname}`).toBe(`http://localhost:${mockPort}/logout`);
+    expect(discoveryRequests).toBe(before);
+    await expectSessionGone(sessionToken);
+    expect(reportErrorSpy).not.toHaveBeenCalled();
+  });
+
+  // The discovery cache lives in process memory and only the login flow used
+  // to fill it, so after an API restart (or on a second replica) logout found
+  // no end_session_endpoint and skipped the IdP. Its session stayed open and
+  // the next "Sign in with SSO" on that machine went straight back into the
+  // previous user's account (#1787).
+  it("discovers on demand and returns the IdP logoutUrl when the discovery cache is cold (#1787)", async () => {
+    const sessionToken = await oidcSessionWithWarmCache();
+    oidcModule.resetOidcDiscoveryCacheForTests();
+    const before = discoveryRequests;
+
+    const res = await logoutWithSession(sessionToken);
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.logoutUrl).toBe("string");
+    const logoutUrl = new URL(body.logoutUrl);
+    expect(`${logoutUrl.origin}${logoutUrl.pathname}`).toBe(`http://localhost:${mockPort}/logout`);
+    expect(logoutUrl.searchParams.get("id_token_hint")).toBe("fake-id-token");
+    expect(logoutUrl.searchParams.get("post_logout_redirect_uri")).toBe(
+      "http://localhost:9999/login",
+    );
+    expect(discoveryRequests).toBe(before + 1);
+    await expectSessionGone(sessionToken);
+    expect(reportErrorSpy).not.toHaveBeenCalled();
+  });
+
+  function expectReportedDiscoveryFault(code: string) {
+    expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+    const [err, ctx] = reportErrorSpy.mock.calls[0];
+    expect(ctx).toEqual({
+      source: "http",
+      route: "/api/auth/logout",
+      method: "POST",
+      subsystem: "oidc-logout",
+    });
+    // Operational: an unreachable or broken IdP is an environment problem,
+    // not a SnapOtter bug, so it reaches Sentry as a throttled warning.
+    expect(err).toMatchObject({ name: "SafeError", kind: "operational", code });
+    // The real classifier must agree: an abort-shaped cause, say, would make
+    // it drop the event as "expected" and nothing would reach Sentry.
+    expect(classifyError(err, "http")).toBe("operational");
+    return err as Error;
+  }
+
+  it("still logs out locally and reports when cold-cache discovery fails (#1787)", async () => {
+    const sessionToken = await oidcSessionWithWarmCache();
+    oidcModule.resetOidcDiscoveryCacheForTests();
+    // The mock IdP 404s every discovery document outside its root issuer.
+    (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}/broken`;
+    try {
+      const res = await logoutWithSession(sessionToken);
+
+      await expectLoggedOutLocally(res, sessionToken);
+      const err = expectReportedDiscoveryFault("OIDC_DISCOVERY_FAILED");
+      expect(err.cause).toBeInstanceOf(Error);
+    } finally {
+      (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}`;
+    }
+  });
+
+  it("omits logoutUrl without reporting when a cold-cache discovery finds no end_session_endpoint (#1787)", async () => {
+    const sessionToken = await oidcSessionWithWarmCache();
+    oidcModule.resetOidcDiscoveryCacheForTests();
+    (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}/noend`;
+    try {
+      const res = await logoutWithSession(sessionToken);
+
+      await expectLoggedOutLocally(res, sessionToken);
+      expect(reportErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}`;
+      // This discovery succeeded, so the cache now holds the /noend document.
+      oidcModule.resetOidcDiscoveryCacheForTests();
+    }
+  });
+
+  // Only an ID-token session with OIDC on needs the IdP. Any other logout on a
+  // cold cache must not wait on discovery, even with the IdP hanging.
+  it("never runs discovery on a cold cache for a logout that has no IdP session to end (#1787)", async () => {
+    const oidcToken = await oidcSessionWithWarmCache();
+    const passwordToken = await loginAsAdmin(oidcApp.app);
+    oidcModule.resetOidcDiscoveryCacheForTests();
+    (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}/hang`;
+    try {
+      const started = Date.now();
+      const passwordRes = await oidcApp.app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: { authorization: `Bearer ${passwordToken}` },
+      });
+      (env as any).OIDC_ENABLED = false;
+      const oidcOffRes = await logoutWithSession(oidcToken);
+
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(passwordRes.json()).toEqual({ ok: true });
+      await expectLoggedOutLocally(oidcOffRes, oidcToken);
+      expect(hungResponses).toHaveLength(0);
+      expect(reportErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      (env as any).OIDC_ENABLED = true;
+      (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}`;
+    }
+  });
+
+  it("gives up on a cold-cache discovery the IdP never answers, logs out locally, and reports it (#1787)", async () => {
+    const sessionToken = await oidcSessionWithWarmCache();
+    oidcModule.resetOidcDiscoveryCacheForTests();
+    (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}/hang`;
+    try {
+      const started = Date.now();
+      const res = await logoutWithSession(sessionToken);
+      const elapsed = Date.now() - started;
+
+      // Well under openid-client's own 30s request timeout, which a logout
+      // click would otherwise sit on.
+      expect(elapsed).toBeLessThan(10_000);
+      expect(hungResponses.length).toBeGreaterThan(0);
+      await expectLoggedOutLocally(res, sessionToken);
+      expectReportedDiscoveryFault("OIDC_DISCOVERY_TIMEOUT");
+    } finally {
+      (env as any).OIDC_ISSUER_URL = `http://localhost:${mockPort}`;
+      for (const hung of hungResponses.splice(0)) {
+        hung.writeHead(404);
+        hung.end();
+      }
+    }
+  }, 20_000);
 
   it("fails with oidc_auth_failed when the token response carries no ID-token claims", async () => {
     const res = await callbackWithClaims(null);
