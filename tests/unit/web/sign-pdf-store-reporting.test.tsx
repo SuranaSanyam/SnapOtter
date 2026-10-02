@@ -548,6 +548,28 @@ describe("sign-pdf tells its own failures apart from a bad response", () => {
     expect(useFileStore.getState().processing).toBe(false);
   });
 
+  // #1885: the stream's completed frame can beat the 200. Once a frame with
+  // nothing to download has ended the run, the 200 behind it must not land a
+  // link beside the error.
+  it("ignores the sync answer after the streamed one came with no result", async () => {
+    renderPanel();
+    const xhr = await apply();
+    act(() => {
+      FakeEventSource.instances[0].onmessage?.({
+        data: JSON.stringify({ type: "single", phase: "complete" }),
+      });
+    });
+
+    xhr.respond(200, { downloadUrl: DOWNLOAD_URL });
+
+    expect(screen.getByText(en.errors.invalidResponse)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /download signed pdf/i })).not.toBeInTheDocument();
+    expect(entry().processedUrl).toBeNull();
+    expect(entry().status).not.toBe("completed");
+    expect(useFileStore.getState().processing).toBe(false);
+    expect(vi.mocked(captureHandledError)).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["a JSON null body", null],
     ["a JSON string body", "ok"],
@@ -635,6 +657,31 @@ describe("sign-pdf reports a malformed result", () => {
     expect(entry().status).not.toBe("completed");
     expect(entry().processedUrl).toBeNull();
     expectReported("Tool result has no download URL", undefined);
+  });
+
+  // #1885: a completed frame with no result used to fall into the progress
+  // branch and sit at processing until the five-minute stall timer, and a
+  // result that isn't an object was filed under the wrong type.
+  it.each([
+    ["no result", {}],
+    ["a string result", { result: "done" }],
+    ["an array result", { result: [] }],
+  ])("ends the run at once on a streamed frame with %s", async (_label, extra) => {
+    renderPanel();
+    const xhr = await apply();
+    xhr.respond(202, { jobId: "job-1", async: true });
+
+    act(() => {
+      FakeEventSource.instances[0].onmessage?.({
+        data: JSON.stringify({ type: "single", phase: "complete", ...extra }),
+      });
+    });
+
+    expect(screen.getByText(en.errors.invalidResponse)).toBeInTheDocument();
+    expect(useFileStore.getState().processing).toBe(false);
+    expect(entry().status).not.toBe("completed");
+    expect(entry().processedUrl).toBeNull();
+    expectReported("Tool result body is not a JSON object", undefined);
   });
 
   it("reports nothing for a good result", async () => {

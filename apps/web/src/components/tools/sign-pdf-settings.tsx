@@ -8,10 +8,10 @@ import { formatHeaders } from "@/lib/api";
 import { appUrl, resolveServerUrls } from "@/lib/app-url";
 import { format } from "@/lib/format";
 import {
+  checkToolResult,
   frameFailure,
   type JobFailure,
   jobFailureMessage,
-  MalformedResultError,
   type ProgressFrame,
   parseResultBody,
   reportMalformedResult,
@@ -30,9 +30,12 @@ import { SignaturePad } from "./signature-pad";
 
 const SSE_STALL_TIMEOUT_MS = 5 * 60_000;
 
+/** A result checkToolResult passed: it always carries a download URL. */
+type SignResult = Record<string, unknown> & { downloadUrl: string };
+
 interface ProgressHandlers {
   onProgress?: (percent: number) => void;
-  onComplete: (result: Record<string, unknown>) => void;
+  onComplete: (result: SignResult) => void;
   onFailed: (failure: JobFailure) => void;
   onStall: () => void;
 }
@@ -96,6 +99,23 @@ export function subscribeSignPdfJobProgress(
       } catch {
         return;
       }
+      // A completed frame with nothing to download is the server's bug, the
+      // twin of a sync 2xx body with no downloadUrl (#1740). It used to fall
+      // through to the progress branch and wait out the stall timer (#1885).
+      // It ends the run outside the catch below, so a throw while showing the
+      // error can't relabel it as ours (#1830).
+      let completed: SignResult | null = null;
+      if (data.type === "single" && data.phase === "complete") {
+        try {
+          completed = checkToolResult<SignResult>(data.result);
+        } catch (err) {
+          cleanup();
+          // Reported first: a throw from onFailed's store writes must not lose it.
+          reportMalformedResult(err, { toolId: "sign-pdf" });
+          handlers.onFailed({ reason: "invalidResponse" });
+          return;
+        }
+      }
       try {
         if (data.type === "heartbeat") {
           resetStall();
@@ -103,9 +123,9 @@ export function subscribeSignPdfJobProgress(
         }
         if (data.type !== "single") return;
         resetStall();
-        if (data.phase === "complete" && data.result) {
+        if (completed) {
           cleanup();
-          handlers.onComplete(data.result);
+          handlers.onComplete(completed);
           return;
         }
         if (data.phase === "failed") {
@@ -276,21 +296,15 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
     /**
      * A fast sign answers twice: waitForJob returns 200 and the worker has
      * already published the terminal SSE frame, so both reach this panel for
-     * one run. Only the first writes, because a second write would reset the
-     * claim the first one earned.
+     * one run. Only the first settles it, because a second write would reset
+     * the claim the first one earned, and a result landing after the stream
+     * failed the run would put the link up beside that error (#1885).
      */
-    let landed = false;
-    const landResult = (r: Record<string, unknown>) => {
-      if (landed) return;
-      const url = typeof r.downloadUrl === "string" ? r.downloadUrl : null;
-      if (!url) {
-        // Only the progress stream's result gets here: parseResultBody already
-        // turned a sync answer without one away. Still the server's bug (#1740).
-        setError(t.errors.invalidResponse);
-        reportMalformedResult(new MalformedResultError("noDownloadUrl"), { toolId: "sign-pdf" });
-        return;
-      }
-      landed = true;
+    let settled = false;
+    const landResult = (r: SignResult) => {
+      if (settled) return;
+      settled = true;
+      const url = r.downloadUrl;
       useFileStore.getState().updateEntry(capturedIndex, {
         processedUrl: url,
         processedFilename: signedFilenameFrom(url),
@@ -315,6 +329,7 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
         finish();
       },
       onFailed: (failure) => {
+        settled = true;
         setError(jobFailureMessage(failure, t.errors));
         finish();
       },
@@ -356,9 +371,9 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
         // store writes failing: it ends the run the way the progress stream's
         // handling error does, and still surfaces (#1354, the sync twin of
         // #1287).
-        let result: Record<string, unknown> | null = null;
+        let result: SignResult | null = null;
         try {
-          result = parseResultBody<Record<string, unknown>>(xhr.responseText);
+          result = parseResultBody<SignResult>(xhr.responseText);
         } catch (err) {
           setError(t.errors.invalidResponse);
           reportMalformedResult(err, { status: xhr.status, toolId: "sign-pdf" });
