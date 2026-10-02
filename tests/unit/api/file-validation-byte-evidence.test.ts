@@ -377,3 +377,335 @@ describe("SVGZ contents (#1782)", () => {
     });
   });
 });
+
+// Each of these signatures is printable ASCII, so text can open with it, and
+// used to be typed as that image on the signature alone (#1859). Every one
+// now needs a header behind it that text can't spell.
+describe("ASCII signatures need a header behind them (#1859)", () => {
+  const unrecognized = { valid: false, reason: "Unrecognized image format" };
+
+  it.each([
+    "BMW service notes\nOil change due in May.\n",
+    "P1 priority list\n",
+    "P2 plan\n",
+    "P3 meeting agenda\n",
+    "P4 notes\n",
+    "P5 report\n",
+    "P6 is the sixth item\n",
+    "P7 notes, not a PAM\n",
+    "P3 3 items to buy\n",
+    "FOVbar is a word\n",
+    "SIMPLE question: why?\n",
+    "SIMPLE  = maybe\n",
+    "SIMPLE  = The plan for Q3\n",
+    "SDPX draft, version two\n",
+    "XPDS draft, version two\n",
+    "DDS notes for the handover\n",
+    "qoif is not a word\n",
+    "8BPS notes\n",
+  ])("doesn't take text opening %j for an image", async (text) => {
+    expect(await validateImageBuffer(Buffer.from(text), "notes.txt")).toEqual(unrecognized);
+  });
+
+  it.each([
+    ["bmp", "bmp", "image/bmp"],
+    ["pbm", "pbm", "image/x-portable-bitmap"],
+    ["pgm", "pgm", "image/x-portable-graymap"],
+    ["ppm", "ppm", "image/x-portable-pixmap"],
+    ["fits", "fits", "image/fits"],
+    ["dpx", "dpx", "image/x-dpx"],
+    ["dds", "dds", "image/vnd.ms-dds"],
+    ["qoi", "qoi", "image/qoi"],
+    ["psd", "psd", "image/vnd.adobe.photoshop"],
+  ])("still types the real .%s fixture from its bytes", async (ext, format, mime) => {
+    const bytes = readFixture(fixtures.image.formats(ext));
+    byBytes(await validateImageBuffer(bytes, `sample.${ext}`), format);
+    expect(await mimeFor(bytes, `sample.${ext}`)).toBe(mime);
+  });
+
+  describe("BMP", () => {
+    const bmp = (dibSize: number) => {
+      const buf = Buffer.alloc(64);
+      buf.write("BM", 0, "latin1");
+      buf.writeUInt32LE(64, 2);
+      buf.writeUInt32LE(14 + dibSize, 10);
+      buf.writeUInt32LE(dibSize, 14);
+      return buf;
+    };
+
+    // OS/2 1.x (12), OS/2 2.x (16 to 64, cut short anywhere in that range),
+    // Windows v3 to v5 (40, 52, 56, 108, 124).
+    it.each([12, 16, 17, 40, 41, 52, 56, 64, 108, 124])(
+      "takes a DIB header of %i bytes",
+      async (size) => {
+        byBytes(await validateImageBuffer(bmp(size), "a.bmp"), "bmp");
+      },
+    );
+
+    it.each([0, 11, 13, 15, 125, 0x20202020])("rejects a DIB header size of %i", async (size) => {
+      expect(await validateImageBuffer(bmp(size), "a.bmp")).toEqual(unrecognized);
+    });
+
+    it("rejects a BM too short to hold the DIB header size", async () => {
+      expect(await validateImageBuffer(bmp(40).subarray(0, 17), "a.bmp")).toEqual(unrecognized);
+    });
+  });
+
+  describe("Netpbm", () => {
+    it.each([
+      ["P1\n32 21\n0 1 1 0\n", "pbm"],
+      ["P2\n32 21\n255\n127 103\n", "pgm"],
+      ["P3\n32 21\n255\n164 116 137\n", "ppm"],
+      ["P4\n640 426\n\x00\x0f", "pbm"],
+      ["P5 2 2 255 abcd", "pgm"],
+      ["P6\n# Created by GIMP version 2.10.38 PNM plug-in\n2 1\n255\nabcdef", "ppm"],
+      ["P6\r\n2\t1\r\n255\r\nabcdef", "ppm"],
+      ["P6 # width\n2 # height\n1\n255\nabcdef", "ppm"],
+      ["P6#comment right after the magic\n2 1\n255\nabcdef", "ppm"],
+      ["P6 # ended by a CR\r2 1\n255\nabcdef", "ppm"],
+      ["P6\n9 9\n255\n", "ppm"],
+      ["P6\u000b2\u000c1\n255\n", "ppm"],
+    ])("takes the header of %j", async (text, format) => {
+      byBytes(await validateImageBuffer(Buffer.from(text, "latin1"), "a.pnm"), format);
+    });
+
+    it.each([
+      ["P6", "only the magic"],
+      ["P6\n", "no width"],
+      ["P6\n2", "no height"],
+      ["P6\n2 ", "nothing after the width"],
+      ["P62 1\n255\n", "no separator after the magic"],
+      ["P6\n2x1\n255\n", "no separator between the dimensions"],
+      ["P6\n# a comment that never ends", "an unterminated comment"],
+      ["P6\n-2 1\n255\n", "a signed width"],
+    ])("rejects %j (%s)", async (text) => {
+      expect(await validateImageBuffer(Buffer.from(text, "latin1"), "a.ppm")).toEqual(unrecognized);
+    });
+
+    // A header padded with comments past the scan window isn't read to its end.
+    it("stops looking for the dimensions after the header window", async () => {
+      const padded = `P6\n${"# padding\n".repeat(7000)}2 1\n255\nabcdef`;
+      expect(await validateImageBuffer(Buffer.from(padded), "a.ppm")).toEqual(unrecognized);
+      const short = `P6\n${"# padding\n".repeat(100)}2 1\n255\nabcdef`;
+      byBytes(await validateImageBuffer(Buffer.from(short), "a.ppm"), "ppm");
+    });
+
+    it("takes a PAM by its WIDTH line", async () => {
+      const pam = "P7\nWIDTH 32\nHEIGHT 21\nDEPTH 3\nMAXVAL 255\nTUPLTYPE RGB\nENDHDR\nabc";
+      byBytes(await validateImageBuffer(Buffer.from(pam), "a.pam"), "ppm");
+      const commented = "P7\n# written by hand\nHEIGHT 21\nWIDTH 32\nENDHDR\n";
+      byBytes(await validateImageBuffer(Buffer.from(commented), "a.pam"), "ppm");
+      byBytes(await validateImageBuffer(Buffer.from("P7\nWIDTH\t32\n"), "a.pam"), "ppm");
+      byBytes(await validateImageBuffer(Buffer.from("P7\n  WIDTH 32\n"), "a.pam"), "ppm");
+    });
+
+    it("stops looking for a PAM's WIDTH line after the header window", async () => {
+      const padded = `P7\n${"# padding\n".repeat(7000)}WIDTH 1\nENDHDR\n`;
+      expect(await validateImageBuffer(Buffer.from(padded), "a.pam")).toEqual(unrecognized);
+      const short = `P7\n${"# padding\n".repeat(100)}WIDTH 1\nENDHDR\n`;
+      byBytes(await validateImageBuffer(Buffer.from(short), "a.pam"), "ppm");
+    });
+
+    it.each([
+      ["P7\nHEIGHT 21\nENDHDR\nWIDTH 32\n", "a WIDTH line only after ENDHDR"],
+      ["P7\nWIDTH\nHEIGHT 21\n", "a WIDTH line with no number"],
+      ["P7\nWIDTH32\n", "no space after WIDTH"],
+      ["P7 WIDTH 32\n", "WIDTH on the magic's line"],
+    ])("rejects a PAM with %s", async (text) => {
+      expect(await validateImageBuffer(Buffer.from(text), "a.pam")).toEqual(unrecognized);
+    });
+  });
+
+  describe("FITS", () => {
+    const card = (value: string) => Buffer.from(`SIMPLE  = ${value}`.padEnd(2880, " "), "latin1");
+
+    it("takes a fixed-format SIMPLE = T card", async () => {
+      byBytes(await validateImageBuffer(card(`${" ".repeat(19)}T`), "a.fits"), "fits");
+    });
+
+    it("takes a free-format SIMPLE = T card", async () => {
+      byBytes(await validateImageBuffer(card("T / conforms"), "a.fits"), "fits");
+      byBytes(await validateImageBuffer(card("T/conforms"), "a.fits"), "fits");
+    });
+
+    it("takes a T that ends the buffer", async () => {
+      byBytes(await validateImageBuffer(Buffer.from("SIMPLE  = T"), "a.fits"), "fits");
+    });
+
+    it.each([
+      ["SIMPLE = F", card(`${" ".repeat(19)}F`)],
+      ["no value", card("")],
+      ["a word starting with T", card("True story")],
+      ["no space before the =", Buffer.from("SIMPLE= T".padEnd(80, " "))],
+      ["a T past the first card", Buffer.from(`SIMPLE  = ${" ".repeat(70)}T`)],
+    ])("rejects %s", async (_label, bytes) => {
+      expect(await validateImageBuffer(bytes, "a.fits")).toEqual(unrecognized);
+    });
+  });
+
+  describe("DPX", () => {
+    // The image data offset at byte 4, big-endian after SDPX, little-endian
+    // after XPDS. ImageMagick writes 8192, ffmpeg 1664.
+    const dpx = (magic: string, offset: number, length = 8192, order = magic) => {
+      const buf = Buffer.alloc(length);
+      buf.write(magic, 0, "latin1");
+      if (order === "SDPX") buf.writeUInt32BE(offset, 4);
+      else buf.writeUInt32LE(offset, 4);
+      return buf;
+    };
+
+    it.each([
+      ["SDPX", 8192],
+      ["XPDS", 1664],
+      ["SDPX", 768],
+      ["XPDS", 2048],
+    ])("takes %s with its image data at %i", async (magic, offset) => {
+      byBytes(await validateImageBuffer(dpx(magic, offset), "a.dpx"), "dpx");
+    });
+
+    it("doesn't care what the version string says", async () => {
+      for (const version of ["V3.0", "V1.0    ", "\0\0\0\0\0\0\0\0"]) {
+        const bytes = dpx("SDPX", 2048);
+        bytes.write(version, 8, "latin1");
+        byBytes(await validateImageBuffer(bytes, "a.dpx"), "dpx");
+      }
+    });
+
+    it.each([
+      ["data inside the generic header", dpx("SDPX", 767)],
+      ["data past the end of the file", dpx("SDPX", 8193)],
+      ["an offset in the wrong byte order", dpx("SDPX", 2048, 8192, "XPDS")],
+      ["a header cut at 7 bytes", dpx("XPDS", 2048).subarray(0, 7)],
+    ])("rejects %s", async (_label, bytes) => {
+      expect(await validateImageBuffer(bytes, "a.dpx")).toEqual(unrecognized);
+    });
+
+    it("takes data that starts exactly at the end of the buffer", async () => {
+      byBytes(await validateImageBuffer(dpx("XPDS", 1024, 1024), "a.dpx"), "dpx");
+    });
+
+    it("still takes a Cineon file by its binary signature", async () => {
+      const cineon = Buffer.alloc(64);
+      Buffer.from([0x80, 0x2a, 0x5f, 0xd7]).copy(cineon);
+      byBytes(await validateImageBuffer(cineon, "a.cin"), "dpx");
+    });
+  });
+
+  describe("DDS", () => {
+    const dds = (headerSize: number) => {
+      const buf = Buffer.alloc(128);
+      buf.write("DDS ", 0, "latin1");
+      buf.writeUInt32LE(headerSize, 4);
+      return buf;
+    };
+
+    it("takes a 124-byte header", async () => {
+      byBytes(await validateImageBuffer(dds(124), "a.dds"), "dds");
+    });
+
+    it.each([0, 123, 125, 0x65746f6e])("rejects a header size of %i", async (size) => {
+      expect(await validateImageBuffer(dds(size), "a.dds")).toEqual(unrecognized);
+    });
+
+    it("rejects a header cut at 7 bytes", async () => {
+      expect(await validateImageBuffer(dds(124).subarray(0, 7), "a.dds")).toEqual(unrecognized);
+    });
+  });
+
+  describe("QOI", () => {
+    const qoi = (width: number, height: number, channels: number, colorspace: number) => {
+      const buf = Buffer.alloc(22);
+      buf.write("qoif", 0, "latin1");
+      buf.writeUInt32BE(width, 4);
+      buf.writeUInt32BE(height, 8);
+      buf[12] = channels;
+      buf[13] = colorspace;
+      return buf;
+    };
+
+    it.each([
+      [3, 0],
+      [4, 0],
+      [3, 1],
+      [4, 1],
+    ])("takes %i channels in colourspace %i", async (channels, colorspace) => {
+      byBytes(await validateImageBuffer(qoi(32, 21, channels, colorspace), "a.qoi"), "qoi");
+    });
+
+    it.each([
+      ["zero width", qoi(0, 21, 3, 0)],
+      ["zero height", qoi(32, 0, 3, 0)],
+      ["two channels", qoi(32, 21, 2, 0)],
+      ["five channels", qoi(32, 21, 5, 0)],
+      ["colourspace 2", qoi(32, 21, 3, 2)],
+      ["a header cut at 13 bytes", qoi(32, 21, 3, 0).subarray(0, 13)],
+      ["a header cut at 12 bytes", qoi(32, 21, 3, 0).subarray(0, 12)],
+    ])("rejects %s", async (_label, bytes) => {
+      expect(await validateImageBuffer(bytes, "a.qoi")).toEqual(unrecognized);
+    });
+  });
+
+  describe("PSD", () => {
+    const psd = (version: number) => {
+      const buf = Buffer.alloc(64);
+      buf.write("8BPS", 0, "latin1");
+      buf.writeUInt16BE(version, 4);
+      return buf;
+    };
+
+    it.each([
+      [1, "PSD"],
+      [2, "PSB"],
+    ])("takes version %i (%s)", async (version) => {
+      byBytes(await validateImageBuffer(psd(version), "a.psd"), "psd");
+    });
+
+    // The reserved bytes after the version should be zero, but a decoder
+    // doesn't need them to be and the version's NUL already rules text out.
+    it("takes a header with junk in its reserved bytes", async () => {
+      byBytes(await validateImageBuffer(Buffer.from(psd(1)).fill(7, 6, 12), "a.psd"), "psd");
+    });
+
+    it.each([
+      ["version 0", psd(0)],
+      ["version 3", psd(3)],
+      ["a header cut at 5 bytes", psd(1).subarray(0, 5)],
+    ])("rejects %s", async (_label, bytes) => {
+      expect(await validateImageBuffer(bytes, "a.psd")).toEqual(unrecognized);
+    });
+  });
+
+  describe("Sigma X3F", () => {
+    const x3f = (major: number, minor: number) => {
+      const buf = Buffer.alloc(64);
+      buf.write("FOVb", 0, "latin1");
+      buf.writeUInt16LE(minor, 4);
+      buf.writeUInt16LE(major, 6);
+      return buf;
+    };
+
+    it.each([
+      [1, 0],
+      [2, 0],
+      [2, 1],
+      [2, 3],
+      [2, 255],
+      [3, 0],
+      [4, 1],
+      [15, 0],
+    ])("takes version %i.%i", async (major, minor) => {
+      byBytes(await validateImageBuffer(x3f(major, minor), "a.x3f"), "raw");
+      byBytes(await validateImageBuffer(x3f(major, minor), "upload.bin"), "raw");
+    });
+
+    it.each([
+      ["major version 0", x3f(0, 0)],
+      ["major version 16", x3f(16, 0)],
+      ["minor version 256", x3f(2, 256)],
+      ["a header cut at 7 bytes", x3f(2, 0).subarray(0, 7)],
+    ])("leaves a header with %s to the name", async (_label, bytes) => {
+      byNameOnly(await validateImageBuffer(bytes, "a.x3f"), "raw");
+      expect(await validateImageBuffer(bytes, "upload.bin")).toEqual(unrecognized);
+    });
+  });
+});
