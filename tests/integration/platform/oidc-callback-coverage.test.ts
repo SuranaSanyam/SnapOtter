@@ -46,6 +46,7 @@
  * assertions.
  */
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { inspect } from "node:util";
 import { sign } from "@fastify/cookie";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,6 +105,7 @@ const { sanitizeUsername, UsernameRaceExhaustedError } = await import(
   "../../../apps/api/src/lib/external-auth-resolver.js"
 );
 const { classifyError } = await import("../../../apps/api/src/lib/error-report.js");
+const { buildBeforeSend } = await import("../../../apps/api/src/lib/sentry-scrub.js");
 const mfaModule = await import("../../../apps/api/src/plugins/mfa.js");
 const oidcModule = await import("../../../apps/api/src/plugins/oidc.js");
 const { getOidcEndSessionEndpoint } = oidcModule;
@@ -118,6 +120,23 @@ import { parseExternalUrl, SSO_DEPLOYMENTS } from "./sso-deployments.js";
 const TEST_COOKIE_SECRET = "test-cookie-secret";
 function signState(state: string): string {
   return sign(JSON.stringify({ state, nonce: "n", codeVerifier: "v" }), TEST_COOKIE_SECRET);
+}
+
+/**
+ * The reported error, and what Sentry's beforeSend keeps of it on the default
+ * and the diagnostic (raw message) path, must not mention the username.
+ */
+function expectNoUsernameInSentryView(reported: unknown, username: string): void {
+  const err = reported as Error;
+  expect(inspect(err, { showHidden: true, depth: Number.POSITIVE_INFINITY })).not.toContain(
+    username,
+  );
+  for (const diagnostic of [false, true]) {
+    const event = { exception: { values: [{ type: err.name, value: err.message }] } };
+    const sent = buildBeforeSend(() => true, diagnostic)(event, { originalException: err });
+    expect(sent).not.toBeNull();
+    expect(JSON.stringify(sent)).not.toContain(username);
+  }
 }
 
 async function findUserByExternalId(externalId: string) {
@@ -964,7 +983,7 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
 
   it("redirects to oidc_auth_failed instead of a raw 500 when auto-create exhausts its username-race retries (#978)", async () => {
     const sub = `sub-raced-${Math.random().toString(36).slice(2, 10)}`;
-    const raceErr = new UsernameRaceExhaustedError("oidc", "raced", 3);
+    const raceErr = new UsernameRaceExhaustedError();
     resolverFailure.next = raceErr;
     const res = await callbackWithClaims({ sub, preferred_username: "raced" });
 
@@ -997,6 +1016,12 @@ describe("OIDC callback claim handling and resolver outcomes", () => {
     // The real reportError drops "expected" errors, which would make this
     // report a no-op.
     expect(classifyError(raceErr, "http")).not.toBe("expected");
+    // The exact-context match above already rules out a username riding along
+    // in the report context. This guards the callback against wrapping or
+    // annotating the error with it on the way out (#1866); the error's own
+    // contents are pinned at the real throw site in
+    // tests/unit/api/external-auth-resolver-mutation.test.ts.
+    expectNoUsernameInSentryView(reportErrorSpy.mock.calls[0][0], "raced");
   });
 
   it("still surfaces any other resolver throw as a 500 with no misclassified audit row", async () => {

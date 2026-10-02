@@ -18,6 +18,7 @@
  * Container-free: db, config, and audit are mocked; isDisabledRole is the real
  * function (it is pure).
  */
+import { inspect } from "node:util";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Hoisted mock state ──────────────────────────────────────────────────
@@ -118,10 +119,12 @@ vi.mock("../../../apps/api/src/db/index.js", () => {
   };
 });
 
+import { isSafeMessageError } from "@snapotter/shared";
 import {
   resolveExternalUser,
   UsernameRaceExhaustedError,
 } from "../../../apps/api/src/lib/external-auth-resolver.js";
+import { buildBeforeSend } from "../../../apps/api/src/lib/sentry-scrub.js";
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn() };
@@ -523,6 +526,50 @@ describe("resolveExternalUser: auto-create username race", () => {
     // resolver has to keep throwing exactly it, not a plain Error.
     await expect(exhausted).rejects.toBeInstanceOf(UsernameRaceExhaustedError);
     expect(state.inserts).toHaveLength(3);
+  });
+
+  it("keeps the username out of everything the exhaustion error hands Sentry (#1866)", async () => {
+    state.insertRowCounts = [0, 0, 0];
+    state.selectRows = [
+      [],
+      [],
+      [{ id: "team-default" }],
+      [],
+      [],
+      [{ id: "team-default" }],
+      [],
+      [],
+      [{ id: "team-default" }],
+      [],
+    ];
+    // Short on purpose: the scrubber masks quoted runs of 24+ characters, so a
+    // name this length is exactly what used to reach Sentry verbatim.
+    const username = "jane_smith";
+    const err: unknown = await resolveExternalUser(
+      baseParams({ autoCreate: true, username }),
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(UsernameRaceExhaustedError);
+    const raced = err as Error;
+    // Pinned exactly, so the externalId (a SAML NameID is usually an email),
+    // the email, or anything else interpolated later fails here too.
+    expect(raced.message).toBe("SSO auto-create lost the username race on every retry");
+    // Every property, hidden or not, the stack, and any cause chain.
+    expect(inspect(raced, { showHidden: true, depth: Number.POSITIVE_INFINITY })).not.toContain(
+      username,
+    );
+    // A constant, authored message: the scrubber sends SafeError text as is.
+    expect(isSafeMessageError(raced)).toBe(true);
+
+    // What beforeSend leaves of a real capture, on the default path and on a
+    // consenting (diagnostic) instance that keeps the raw message.
+    for (const diagnostic of [false, true]) {
+      const beforeSend = buildBeforeSend(() => true, diagnostic);
+      const event = { exception: { values: [{ type: raced.name, value: raced.message }] } };
+      const sent = beforeSend(event, { originalException: raced });
+      expect(sent).not.toBeNull();
+      expect(JSON.stringify(sent)).not.toContain(username);
+    }
   });
 });
 
