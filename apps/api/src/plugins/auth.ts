@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import {
   ANALYTICS_EVENTS,
   type PasswordRule,
+  SafeError,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
   USERNAME_PATTERN,
@@ -16,6 +17,7 @@ import { sharedRedis } from "../jobs/connection.js";
 import { trackEvent } from "../lib/analytics.js";
 import { auditFromRequest, sanitizeAuditInput } from "../lib/audit.js";
 import { isEnterpriseFeatureEnabled } from "../lib/enterprise-feature.js";
+import { isHttpsUrl } from "../lib/env.js";
 import { reportError } from "../lib/error-report.js";
 import {
   checkLoginThrottle,
@@ -711,6 +713,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             // replaces any copy of our two parameters the endpoint carries.
             // An endpoint that isn't a URL throws into the catch below (#1788).
             const url = new URL(endSessionEndpoint);
+            // Discovery takes any string as end_session_endpoint, and the web
+            // app navigates to logoutUrl, so a javascript: or data: endpoint
+            // would run in our origin (#1855). Plain http only where discovery
+            // itself may use it (an http EXTERNAL_URL, i.e. a dev setup); on
+            // https it would also send the ID token in the clear. The message
+            // is constant so no part of the endpoint reaches Sentry; only the
+            // local log names the scheme, so an operator can tell an http
+            // endpoint on an https deployment from a hostile one.
+            const allowed = isHttpsUrl(env.EXTERNAL_URL) ? ["https:"] : ["https:", "http:"];
+            if (!allowed.includes(url.protocol)) {
+              request.log.warn(
+                { scheme: url.protocol.slice(0, 32), userId: session.userId },
+                "logout: OIDC end_session_endpoint scheme not allowed",
+              );
+              throw new SafeError("OIDC end_session_endpoint has an unsupported scheme", {
+                code: "OIDC_END_SESSION_SCHEME",
+              });
+            }
             url.searchParams.set("id_token_hint", session.idToken);
             url.searchParams.set("post_logout_redirect_uri", `${env.EXTERNAL_URL}/login`);
             logoutUrl = url.toString();
