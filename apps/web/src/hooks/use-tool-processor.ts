@@ -23,6 +23,7 @@ import {
 } from "@/lib/progress-frames";
 import { asNotesMap, parseFileNotesHeader, pickResultNotes } from "@/lib/result-notes";
 import { reportRunEndFailure } from "@/lib/run-end-report";
+import { runEndWrites } from "@/lib/run-teardown";
 import { MULTI_FILE_TOOLS } from "@/lib/tool-display-modes";
 import { getToolName } from "@/lib/tool-i18n";
 import { generateId } from "@/lib/utils";
@@ -308,21 +309,32 @@ export function useToolProcessor(toolId: string) {
       // means the closure belongs to an earlier run: fall through and
       // settle the live run the single-run way.
       if (batchRunRef.current?.cancelLocally()) return;
-      clearJobEvidenceTimer();
-      clearStallTimer();
-      if (elapsedRef.current) clearInterval(elapsedRef.current);
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
+      // The stream closes here, so nothing else will ever end this run:
+      // each write gets its own guard, or one that throws would leave the
+      // run spinning with its cancel button already gone (#1814).
+      let teardownError: { cause: unknown } | null = null;
+      try {
+        clearJobEvidenceTimer();
+        clearStallTimer();
+        if (elapsedRef.current) clearInterval(elapsedRef.current);
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        setProgress(IDLE_PROGRESS);
+        teardownError = runEndWrites([
+          clearActiveJob,
+          () => setError("Canceled"),
+          () => setProcessing(false),
+        ]);
+      } finally {
+        // Same settle the batch failRun gives canceled entries: "failed"
+        // with "Canceled", so the failure screen renders instead of an
+        // eternal pulse (#929). Last, and it never throws.
+        settleProcessingEntries("Canceled");
       }
-      clearActiveJob();
-      setError("Canceled");
-      setProcessing(false);
-      setProgress(IDLE_PROGRESS);
-      // Same settle the batch failRun gives canceled entries: "failed"
-      // with "Canceled", so the failure screen renders instead of an
-      // eternal pulse (#929).
-      settleProcessingEntries("Canceled");
+      // The first throw still reaches the cancel button's catch (#1698).
+      if (teardownError) throw teardownError.cause;
     }
   }, [
     clearJobEvidenceTimer,
@@ -787,20 +799,11 @@ export function useToolProcessor(toolId: string) {
         failure: { message: string; category?: FeedbackErrorCategory } | null,
       ): { cause: unknown } | null => {
         setProgress(IDLE_PROGRESS);
-        let firstError: { cause: unknown } | null = null;
-        const steps = [
+        const firstError = runEndWrites([
           clearActiveJob,
           ...(failure ? [() => setError(failure.message)] : []),
           () => setProcessing(false),
-        ];
-        for (const step of steps) {
-          try {
-            step();
-          } catch (cause) {
-            console.error("Ending the run failed", cause);
-            firstError ??= { cause };
-          }
-        }
+        ]);
         if (failure) failEntry(failure.message, failure.category);
         return firstError;
       };
@@ -1076,9 +1079,9 @@ export function useToolProcessor(toolId: string) {
       // nothing server-side (#767).
       setActiveJob(clientJobId, cancelCurrentJob);
 
-      // Tear down the run without touching the outcome state; callers set
-      // the result or error first.
-      const finishRun = () => {
+      // Stops everything that could still act on the run: its timers, its
+      // stream and its batch closure. No store writes.
+      const releaseRun = () => {
         clearJobEvidenceTimer();
         clearStallTimer();
         if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -1087,15 +1090,37 @@ export function useToolProcessor(toolId: string) {
           eventSourceRef.current = null;
         }
         batchRunRef.current = null;
-        clearActiveJob();
-        setProcessing(false);
         setProgress(IDLE_PROGRESS);
       };
 
+      // Tear down the run without touching the outcome state; callers set
+      // the result or error first.
+      const finishRun = () => {
+        releaseRun();
+        clearActiveJob();
+        setProcessing(false);
+      };
+
+      // The evidence timer and the cancel 404 end a batch through here, with
+      // nothing else left to end it, so a write that throws mustn't skip the
+      // rest: the first throw is rethrown once the run is over and reported
+      // (#1814). An error write that throws without landing is different:
+      // the run stays live, as before. The SSE handler's own failure path
+      // (#1287) then ends it with a message, and on the other paths the
+      // cancel button stays armed, so a second click can still end it.
       const failRun = (message: string, reason: string, category?: FeedbackErrorCategory) => {
+        let teardownError: { cause: unknown } | null = null;
         try {
-          setError(message);
-          finishRun();
+          try {
+            setError(message);
+          } catch (cause) {
+            if (useFileStore.getState().error !== message) throw cause;
+            console.error("Ending the run failed", cause);
+            teardownError = { cause };
+          }
+          releaseRun();
+          const writeError = runEndWrites([clearActiveJob, () => setProcessing(false)]);
+          teardownError ??= writeError;
         } finally {
           // Entries were set to "processing" at kickoff (the reset loop
           // above). A whole-run failure that never reached settleFromZip must
@@ -1109,25 +1134,32 @@ export function useToolProcessor(toolId: string) {
           // 404 end a batch through here, so nothing else would settle the
           // run (#1778, the batch twin of #1698). In a finally so a throwing
           // teardown can't leave the entries pulsing either; that throw still
-          // reaches the caller.
-          try {
-            const runEntries = useFileStore.getState().entries;
-            for (let i = 0; i < runEntries.length; i++) {
-              if (runEntries[i]?.status === "processing") {
-                updateEntry(i, {
-                  status: "failed",
-                  error: message,
-                  errorCategory: category ?? null,
-                });
-              }
+          // reaches the caller. Each entry gets its own try, so one write
+          // that throws can't leave the batch's later entries pulsing
+          // (#1814, the twin of the pipeline's #1779), and the run reports
+          // once, not once per entry.
+          const runEntries = useFileStore.getState().entries;
+          let settleError: { cause: unknown } | null = null;
+          for (let i = 0; i < runEntries.length; i++) {
+            if (runEntries[i]?.status !== "processing") continue;
+            try {
+              updateEntry(i, {
+                status: "failed",
+                error: message,
+                errorCategory: category ?? null,
+              });
+            } catch (err) {
+              console.error("Failing the run's entry failed", err);
+              settleError ??= { cause: err };
             }
-          } catch (err) {
-            console.error("Failing the run's entry failed", err);
-            reportRunEndFailure("Failing a batch run's entries failed", err, toolId);
+          }
+          if (settleError) {
+            reportRunEndFailure("Failing a batch run's entries failed", settleError.cause, toolId);
           }
         }
         // A canceled run reports the cancel, whichever path carried it in.
         trackBatch(canceledByUser ? "canceled" : "failed", canceledByUser ? "canceled" : reason);
+        if (teardownError) throw teardownError.cause;
       };
 
       const settleFromZip = async (
@@ -1196,22 +1228,18 @@ export function useToolProcessor(toolId: string) {
         const url = serverUrl(String(result.downloadUrl));
         const fileResults = (result.fileResults ?? {}) as Record<string, string>;
         const fileNotes = asNotesMap(result.fileNotes);
+        let refusedStatus: number | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           if (activeJobIdRef.current !== clientJobId) return;
           try {
             const res = await fetch(url, { headers: formatHeaders() });
             // A 4xx is deterministic: the result is gone or this session may
             // not read it. Retrying cannot help, and the message must not
-            // blame the network.
+            // blame the network. It fails the run outside this try, so a
+            // throw from failRun's teardown isn't swallowed as a retry (#1814).
             if (res.status >= 400 && res.status < 500) {
-              if (activeJobIdRef.current !== clientJobId) return;
-              failRun(
-                res.status === 404
-                  ? "Completed result is no longer available. Run the job again."
-                  : "The finished batch could not be downloaded. Refresh and try again.",
-                `download-${res.status}`,
-              );
-              return;
+              refusedStatus = res.status;
+              break;
             }
             if (!res.ok) throw new Error(`Batch download failed: ${res.status}`);
             const blob = await res.blob();
@@ -1225,6 +1253,15 @@ export function useToolProcessor(toolId: string) {
           }
         }
         if (activeJobIdRef.current !== clientJobId) return;
+        if (refusedStatus !== null) {
+          failRun(
+            refusedStatus === 404
+              ? "Completed result is no longer available. Run the job again."
+              : "The finished batch could not be downloaded. Refresh and try again.",
+            `download-${refusedStatus}`,
+          );
+          return;
+        }
         failRun("Processing was interrupted. Retry when reconnected.", "download-failed");
       };
 
