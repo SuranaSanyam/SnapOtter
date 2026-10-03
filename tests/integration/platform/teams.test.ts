@@ -393,6 +393,83 @@ describe("PUT /api/v1/teams/:id", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it("updates storage quota alone and reads the value back", async () => {
+    const quotaBytes = 100 * 1024 * 1024; // 100 MB
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/v1/teams/${teamId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { storageQuota: quotaBytes },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+
+    // Verify via GET /api/v1/teams
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/teams",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(listRes.statusCode).toBe(200);
+    const updatedTeam = JSON.parse(listRes.body).teams.find((t: { id: string }) => t.id === teamId);
+    expect(updatedTeam).toBeDefined();
+    expect(updatedTeam.name).toBe("OldName");
+    expect(updatedTeam.storageQuota).toBe(quotaBytes);
+    expect(updatedTeam.retentionHours).toBeNull();
+  });
+
+  it("updates retention hours alone and reads the value back", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/v1/teams/${teamId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { retentionHours: 48 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.name).toBe("OldName");
+    expect(team?.retentionHours).toBe(48);
+  });
+
+  it("updates both storage quota and retention hours together without name", async () => {
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/v1/teams/${teamId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { storageQuota: 50 * 1024 * 1024, retentionHours: 72 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.name).toBe("OldName");
+    expect(team?.storageQuota).toBe(50 * 1024 * 1024);
+    expect(team?.retentionHours).toBe(72);
+  });
+
+  it("clears storage quota and retention hours when set to null", async () => {
+    // First set values
+    await db
+      .update(schema.teams)
+      .set({ storageQuota: 1024, retentionHours: 24 })
+      .where(eq(schema.teams.id, teamId));
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/v1/teams/${teamId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { storageQuota: null, retentionHours: null },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.storageQuota).toBeNull();
+    expect(team?.retentionHours).toBeNull();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

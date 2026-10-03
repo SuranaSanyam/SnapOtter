@@ -161,4 +161,40 @@ test.describe("Editor Selection Tools", () => {
     // The selection bounds should change, causing a visual difference
     expect(Buffer.compare(beforeInvert, afterInvert)).not.toBe(0);
   });
+
+  test("polygonal lasso closes on Enter and cancels on Escape", async ({ editorPage: page }) => {
+    test.slow();
+
+    await selectTool(page, "lasso-poly");
+
+    const canvas = page.locator("canvas").first();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("Canvas not found");
+
+    // Click 3 vertices to start drawing a polygon
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.waitForTimeout(100);
+    await page.mouse.click(box.x + 200, box.y + 100);
+    await page.waitForTimeout(100);
+    await page.mouse.click(box.x + 150, box.y + 200);
+    await page.waitForTimeout(100);
+
+    // Escape cancels the in-progress polygon
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+
+    // After cancel, clicking 3 vertices and pressing Enter creates the selection
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.waitForTimeout(100);
+    await page.mouse.click(box.x + 200, box.y + 100);
+    await page.waitForTimeout(100);
+    await page.mouse.click(box.x + 150, box.y + 200);
+    await page.waitForTimeout(100);
+
+    const before = await canvas.screenshot();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    const after = await canvas.screenshot();
+    expect(Buffer.compare(before, after)).not.toBe(0);
+  });
 });

@@ -282,10 +282,12 @@ export function isNearFirstVertex(
 /**
  * Lets the editor shortcuts (registered in EditorPage) reach the polygonal lasso
  * inside EditorCanvas, the way editorStageRefHolder exposes the stage. `close`
- * reports whether a polygon was in progress, so Enter can stop there instead of
- * falling through to its crop behaviour.
+ * and `cancel` report whether a polygon was in progress, so Enter and Escape can
+ * stop there instead of falling through to crop or deselect behaviours.
  */
-export const polygonalLassoRefHolder: { current: { close: () => boolean } | null } = {
+export const polygonalLassoRefHolder: {
+  current: { close: () => boolean; cancel: () => boolean } | null;
+} = {
   current: null,
 };
 
@@ -520,6 +522,12 @@ export function useSelectionTool(): SelectionToolApi {
     setPolygonCloseTarget(null);
   }, []);
 
+  const cancelPolygon = useCallback((): boolean => {
+    if (!isDrawingRef.current || polyVerticesRef.current.length === 0) return false;
+    resetPolygon();
+    return true;
+  }, [resetPolygon]);
+
   // The one exit for every close gesture (Enter, double-click, clicking the
   // first vertex), so they all merge into the selection the same way. A polygon
   // is in progress while its vertex list is non-empty, and only this tool fills it.
@@ -534,13 +542,13 @@ export function useSelectionTool(): SelectionToolApi {
     return true;
   }, [resetPolygon, finalizeLasso]);
 
-  // Expose the close gesture to the keyboard shortcuts registered in EditorPage.
+  // Expose the close and cancel gestures to the keyboard shortcuts registered in EditorPage.
   useEffect(() => {
-    polygonalLassoRefHolder.current = { close: closePolygon };
+    polygonalLassoRefHolder.current = { close: closePolygon, cancel: cancelPolygon };
     return () => {
       polygonalLassoRefHolder.current = null;
     };
-  }, [closePolygon]);
+  }, [closePolygon, cancelPolygon]);
 
   // Switching tools mid-polygon discards it, so Enter cannot later close an
   // invisible polygon under another tool.
