@@ -30,6 +30,7 @@ export const sv: TranslationKeys = {
     clear: "Rensa",
     copy: "Kopiera",
     copied: "Kopierat!",
+    copyFailed: "Kopiering misslyckades",
     noResults: "Inga resultat hittades",
     showLess: "Visa mindre",
     showMore: "Visa {count} till",
@@ -1241,7 +1242,13 @@ export const sv: TranslationKeys = {
       name: "Pipeline-byggare",
       description: "Kedja samman flera verktyg till ett arbetsflöde",
     },
-    processing: { canceled: "Bearbetningen avbruten" },
+    processing: {
+      canceled: "Bearbetningen avbruten",
+      cancelUnavailable: "Den här bearbetningen kan inte avbrytas just nu. Den fortsätter.",
+      cancelNotAllowed:
+        "Det gick inte att avbryta: du är utloggad eller får inte stoppa den här bearbetningen. Den fortsätter.",
+      cancelFailed: "Det gick inte att avbryta bearbetningen. Den fortsätter, försök igen.",
+    },
     mediaPlayer: {
       unsupported: "Din webbläsare stöder inte detta medieformat.",
     },
@@ -4330,7 +4337,7 @@ export const sv: TranslationKeys = {
       dropDescription: "Släpp en bild här för att börja",
       openImageButton: "Öppna bild",
       newDocumentButton: "Nytt dokument",
-      pasteHint: "Eller klistra in från urklipp (Ctrl+V)",
+      pasteHint: "Eller klistra in från urklipp ({shortcut})",
     },
     mobile: {
       heading: "Dator rekommenderas",
@@ -4576,8 +4583,8 @@ export const sv: TranslationKeys = {
         median: "Median",
       },
       history: {
-        undoTitle: "Ångra (Ctrl+Z)",
-        redoTitle: "Gör om (Ctrl+Shift+Z)",
+        undoTitle: "Ångra ({shortcut})",
+        redoTitle: "Gör om ({shortcut})",
         empty: "Ingen historik ännu",
         unknown: "Okänd",
         actions: {
@@ -4633,7 +4640,7 @@ export const sv: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nytt lager (Ctrl+Shift+N)",
+        newLayerTitle: "Nytt lager ({shortcut})",
         blend: "Blandning",
         opacity: "Opacitet",
         hideLayer: "Dölj lager",
@@ -5446,6 +5453,7 @@ export const sv: TranslationKeys = {
     fileCount: "{count} filer",
     fileCountSingular: "{count} fil",
     noFilesFound: "Inga filer hittades",
+    loadFailed: "Kunde inte läsa in dina filer.",
     selectFilePrompt: "Välj en fil för att visa detaljer",
     openFile: "Öppna fil",
     selectFile: "Välj fil",

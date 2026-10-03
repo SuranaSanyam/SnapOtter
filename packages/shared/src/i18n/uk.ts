@@ -31,6 +31,7 @@ export const uk: TranslationKeys = {
     clear: "Очистити",
     copy: "Копіювати",
     copied: "Скопійовано!",
+    copyFailed: "Не вдалося скопіювати",
     noResults: "Нічого не знайдено",
     showLess: "Показати менше",
     showMore: "Показати ще {count}",
@@ -1244,7 +1245,13 @@ export const uk: TranslationKeys = {
       name: "Конструктор Pipeline",
       description: "Об'єднання кількох інструментів у робочий процес",
     },
-    processing: { canceled: "Обробку скасовано" },
+    processing: {
+      canceled: "Обробку скасовано",
+      cancelUnavailable: "Цю обробку зараз не можна скасувати. Вона триває.",
+      cancelNotAllowed:
+        "Не вдалося скасувати: ви вийшли із системи або вам не можна зупиняти цю обробку. Вона триває.",
+      cancelFailed: "Не вдалося скасувати обробку. Вона триває, спробуйте ще раз.",
+    },
     mediaPlayer: {
       unsupported: "Ваш браузер не підтримує цей медіаформат.",
     },
@@ -4339,7 +4346,7 @@ export const uk: TranslationKeys = {
       dropDescription: "Перетягніть зображення сюди для початку роботи",
       openImageButton: "Відкрити зображення",
       newDocumentButton: "Новий документ",
-      pasteHint: "Або вставте з буфера обміну (Ctrl+V)",
+      pasteHint: "Або вставте з буфера обміну ({shortcut})",
     },
     mobile: {
       heading: "Рекомендовано настільний ПК",
@@ -4585,8 +4592,8 @@ export const uk: TranslationKeys = {
         median: "Медіана",
       },
       history: {
-        undoTitle: "Скасувати (Ctrl+Z)",
-        redoTitle: "Повторити (Ctrl+Shift+Z)",
+        undoTitle: "Скасувати ({shortcut})",
+        redoTitle: "Повторити ({shortcut})",
         empty: "Історія поки порожня",
         unknown: "Невідомо",
         actions: {
@@ -4642,7 +4649,7 @@ export const uk: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Новий шар (Ctrl+Shift+N)",
+        newLayerTitle: "Новий шар ({shortcut})",
         blend: "Накладання",
         opacity: "Непрозорість",
         hideLayer: "Сховати шар",
@@ -5456,6 +5463,7 @@ export const uk: TranslationKeys = {
     fileCount: "{count} файлів",
     fileCountSingular: "{count} файл",
     noFilesFound: "Файлів не знайдено",
+    loadFailed: "Не вдалося завантажити ваші файли.",
     selectFilePrompt: "Виберіть файл для перегляду деталей",
     openFile: "Відкрити файл",
     selectFile: "Вибрати файл",

@@ -96,14 +96,17 @@ const backingState = resolvePlaywrightBackingState({
 
 // Specs that mutate global server state (settings, users, roles, API keys)
 // or assert on global lists/timing. These run in the chromium-serial project
-// with --workers=1; everything else parallelizes safely.
+// with --workers=1; everything else parallelizes safely. The shared admin's
+// preferences count as global state: every project logs in as that admin, so
+// a pin set by pin-tools shows up in other specs' home pages and screenshots
+// (#1706).
 const SERIAL_SPECS =
-  /gui-settings-|settings\.spec|rbac|security|people|api\.spec|state-bleed|full-session|gui-file-carry|library-save-mode|i18n|theme|gui-performance|navigation-guard/;
+  /gui-settings-|settings\.spec|rbac|security|people|api\.spec|state-bleed|full-session|gui-file-carry|library-save-mode|i18n|theme|gui-performance|navigation-guard|pin-tools/;
 
 // Screenshot-comparison specs. Separate project because baselines are
-// platform-specific: they run locally (darwin baselines) and via the
-// update-visual-baselines workflow, but not in the nightly linux run until
-// linux baselines are committed.
+// platform-specific: darwin baselines serve local runs, and the linux set,
+// rendered by the update-visual-baselines workflow, is compared nightly by
+// nightly.yml's e2e-visual job.
 const VISUAL_SPECS = /gui-visual-/;
 const LEGACY_VISUAL_SPECS = /visual-regression\.spec\.ts/;
 
@@ -127,8 +130,13 @@ export default defineConfig({
   timeout: 30_000,
   expect: {
     timeout: 10_000,
+    // Zero changed pixels allowed. `threshold` is what absorbs rendering
+    // noise: same-commit renders on four ubuntu-latest runners and two Macs
+    // differed by 0 pixels at 0.05, so 0.2 has room to spare. The old 1%
+    // ratio hid whole tool cards and tool-count changes (#1704).
     toHaveScreenshot: {
-      maxDiffPixelRatio: 0.01,
+      maxDiffPixels: 0,
+      threshold: 0.2,
       animations: "disabled",
       caret: "hide",
     },

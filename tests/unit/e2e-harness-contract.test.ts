@@ -813,6 +813,39 @@ test("the dedicated width project owns every required browser width", () => {
   expect(output).toContain("Total: 6 tests in 2 files");
 });
 
+// Every project logs in as the same admin, and user preferences (pinned tools)
+// live on the server. A spec that writes them while a screenshot spec runs in
+// the same invocation can put a Pinned section in a home shot (#1706). The
+// serial project runs as its own invocation with its own database in
+// `pnpm test:e2e`, so that is the only place such a spec may be collected.
+// Writers are found by text: the putPreferences helper or the preferences
+// route. A spec that only clicks a pin toggle isn't detected here; the
+// expectNoPinnedSection guard before each home shot is the runtime backstop.
+test("specs that write user preferences are collected only by the serial project (#1706)", () => {
+  const writers = fs
+    .readdirSync(e2eDir)
+    .filter((file) => file.endsWith(".spec.ts"))
+    .filter((file) => {
+      const source = fs.readFileSync(path.join(e2eDir, file), "utf8");
+      return source.includes("putPreferences(") || source.includes("/v1/preferences");
+    });
+  expect(writers).toContain("pin-tools.spec.ts");
+
+  // Collect every project at once so a project added later is covered too.
+  const listing = collectPlaywright(path.join(root, "playwright.config.ts"));
+  const projectsByFile = new Map<string, Set<string>>();
+  for (const [, project, file] of listing.matchAll(/\[([\w-]+)\] › ([\w.-]+\.spec\.ts):\d+/g)) {
+    const projects = projectsByFile.get(file) ?? new Set<string>();
+    projects.add(project);
+    projectsByFile.set(file, projects);
+  }
+  expect(projectsByFile.size).toBeGreaterThan(0);
+
+  for (const writer of writers) {
+    expect([...(projectsByFile.get(writer) ?? [])], writer).toEqual(["chromium-serial"]);
+  }
+});
+
 test("legacy visual coverage is runnable only through its dedicated collected project", () => {
   const output = execFileSync(
     "pnpm",

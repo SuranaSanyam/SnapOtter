@@ -31,6 +31,7 @@ export const de: TranslationKeys = {
     clear: "Leeren",
     copy: "Kopieren",
     copied: "Kopiert!",
+    copyFailed: "Kopieren fehlgeschlagen",
     noResults: "Keine Ergebnisse gefunden",
     showLess: "Weniger anzeigen",
     showMore: "{count} weitere anzeigen",
@@ -1247,7 +1248,14 @@ export const de: TranslationKeys = {
       name: "Pipeline-Builder",
       description: "Mehrere Werkzeuge zu einem Workflow verketten",
     },
-    processing: { canceled: "Verarbeitung abgebrochen" },
+    processing: {
+      canceled: "Verarbeitung abgebrochen",
+      cancelUnavailable: "Dieser Vorgang kann jetzt nicht abgebrochen werden. Er läuft weiter.",
+      cancelNotAllowed:
+        "Abbrechen nicht möglich: Sie sind abgemeldet oder dürfen diesen Vorgang nicht stoppen. Er läuft weiter.",
+      cancelFailed:
+        "Der Vorgang konnte nicht abgebrochen werden. Er läuft weiter, versuchen Sie es erneut.",
+    },
     mediaPlayer: {
       unsupported: "Ihr Browser unterstützt dieses Medienformat nicht.",
     },
@@ -4355,7 +4363,7 @@ export const de: TranslationKeys = {
       dropDescription: "Ziehen Sie ein Bild hierher, um zu beginnen",
       openImageButton: "Bild öffnen",
       newDocumentButton: "Neues Dokument",
-      pasteHint: "Oder aus der Zwischenablage einfügen (Strg+V)",
+      pasteHint: "Oder aus der Zwischenablage einfügen ({shortcut})",
     },
     mobile: {
       heading: "Desktop empfohlen",
@@ -4601,8 +4609,8 @@ export const de: TranslationKeys = {
         median: "Median",
       },
       history: {
-        undoTitle: "Rückgängig (Strg+Z)",
-        redoTitle: "Wiederholen (Strg+Umschalt+Z)",
+        undoTitle: "Rückgängig ({shortcut})",
+        redoTitle: "Wiederholen ({shortcut})",
         empty: "Noch kein Verlauf",
         unknown: "Unbekannt",
         actions: {
@@ -4658,7 +4666,7 @@ export const de: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Neue Ebene (Strg+Umschalt+N)",
+        newLayerTitle: "Neue Ebene ({shortcut})",
         blend: "Modus",
         opacity: "Deckkraft",
         hideLayer: "Ebene ausblenden",
@@ -5485,6 +5493,7 @@ export const de: TranslationKeys = {
     fileCount: "{count} Dateien",
     fileCountSingular: "{count} Datei",
     noFilesFound: "Keine Dateien gefunden",
+    loadFailed: "Ihre Dateien konnten nicht geladen werden.",
     selectFilePrompt: "Datei auswählen, um Details anzuzeigen",
     openFile: "Datei öffnen",
     selectFile: "Datei auswählen",

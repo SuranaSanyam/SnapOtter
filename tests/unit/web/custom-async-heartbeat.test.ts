@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/analytics", async () => {
+  const { analyticsModuleMock } = await import("../../helpers/mock-analytics.js");
+  return analyticsModuleMock();
+});
+
 import { subscribeEraseObjectJobProgress } from "@/components/tools/erase-object-settings";
 import { subscribeSignPdfJobProgress } from "@/components/tools/sign-pdf-settings";
+import { captureHandledError } from "@/lib/analytics";
 
 class FakeEventSource {
   static OPEN = 1;
@@ -22,9 +29,15 @@ class FakeEventSource {
   }
 }
 
+// Sign PDF's subscriber returns { stop, touch } since #1968; the shared cases
+// below only need the stop half.
 const subscribers = [
   ["erase-object", subscribeEraseObjectJobProgress],
-  ["sign-pdf", subscribeSignPdfJobProgress],
+  [
+    "sign-pdf",
+    (...args: Parameters<typeof subscribeSignPdfJobProgress>) =>
+      subscribeSignPdfJobProgress(...args).stop,
+  ],
 ] as const;
 
 describe.each(subscribers)("%s async progress", (_name, subscribe) => {
@@ -32,6 +45,7 @@ describe.each(subscribers)("%s async progress", (_name, subscribe) => {
     vi.useFakeTimers();
     FakeEventSource.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource);
+    vi.mocked(captureHandledError).mockClear();
   });
 
   afterEach(() => {
@@ -156,6 +170,31 @@ describe.each(subscribers)("%s async progress", (_name, subscribe) => {
     expect(onFailed).toHaveBeenCalledWith({ reason: "noDetail" });
   });
 
+  // #1830 split "complete with no result" off the progress branch; a running
+  // job's progress frame must still only report progress.
+  it("passes a progress frame through without ending the run", () => {
+    const onProgress = vi.fn();
+    const onComplete = vi.fn();
+    const onFailed = vi.fn();
+    const cleanup = subscribe("job-progress", {
+      onProgress,
+      onComplete,
+      onFailed,
+      onStall: vi.fn(),
+    });
+
+    FakeEventSource.instances[0].onmessage?.({
+      data: JSON.stringify({ type: "single", phase: "processing", percent: 40 }),
+    });
+
+    expect(onProgress).toHaveBeenCalledWith(40);
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(onFailed).not.toHaveBeenCalled();
+    expect(vi.mocked(captureHandledError)).not.toHaveBeenCalled();
+    expect(FakeEventSource.instances[0].readyState).toBe(FakeEventSource.OPEN);
+    cleanup();
+  });
+
   it("ignores a malformed frame and keeps waiting", () => {
     const onComplete = vi.fn();
     const onFailed = vi.fn();
@@ -164,10 +203,167 @@ describe.each(subscribers)("%s async progress", (_name, subscribe) => {
     FakeEventSource.instances[0].onmessage?.({ data: "not json" });
     expect(onFailed).not.toHaveBeenCalled();
 
+    const result = { downloadUrl: "/api/v1/download/job-malformed/out.png" };
     FakeEventSource.instances[0].onmessage?.({
-      data: JSON.stringify({ type: "single", phase: "complete", result: { ok: true } }),
+      data: JSON.stringify({ type: "single", phase: "complete", result }),
     });
-    expect(onComplete).toHaveBeenCalledWith({ ok: true });
+    expect(onComplete).toHaveBeenCalledWith(result);
     cleanup();
+  });
+});
+
+// #1830 and #1885: both subscribers check a completed frame's result the way
+// the shared hooks do since #1794, so a frame with nothing to download ends the
+// run at once instead of waiting out the stall timer.
+describe.each(subscribers)(
+  "%s async progress: a completed frame with nothing to download",
+  (name, subscribe) => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      FakeEventSource.instances = [];
+      vi.stubGlobal("EventSource", FakeEventSource);
+      vi.mocked(captureHandledError).mockClear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    it.each([
+      ["an empty result", { result: {} }, "ResultWithoutDownloadError"],
+      ["a non-string download URL", { result: { downloadUrl: 42 } }, "ResultWithoutDownloadError"],
+      ["an array result", { result: [] }, "ResultNotAnObjectError"],
+      ["a string result", { result: "done" }, "ResultNotAnObjectError"],
+      ["a null result", { result: null }, "ResultNotAnObjectError"],
+      ["no result at all", {}, "ResultNotAnObjectError"],
+    ])("fails the run as an invalid response for %s", (_label, extra, reportedAs) => {
+      const onComplete = vi.fn();
+      const onFailed = vi.fn();
+      const onStall = vi.fn();
+      subscribe("job-empty", { onComplete, onFailed, onStall });
+
+      FakeEventSource.instances[0].onmessage?.({
+        data: JSON.stringify({ type: "single", phase: "complete", ...extra }),
+      });
+
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onFailed).toHaveBeenCalledOnce();
+      expect(onFailed).toHaveBeenCalledWith({ reason: "invalidResponse" });
+      expect(vi.mocked(captureHandledError)).toHaveBeenCalledOnce();
+      const [reported, tags] = vi.mocked(captureHandledError).mock.calls[0];
+      expect(reported.name).toBe(reportedAs);
+      expect((reported as { statusCode?: number }).statusCode).toBeUndefined();
+      expect(tags).toEqual({ error_class: "operational", tool_id: name });
+      expect(FakeEventSource.instances[0].readyState).toBe(2);
+      // The run is over: the stall timer went with the stream.
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(onStall).not.toHaveBeenCalled();
+    });
+
+    it("rethrows a throw from onFailed without relabelling it as a tracking failure", () => {
+      const onFailed = vi.fn(() => {
+        throw new Error("onFailed broke");
+      });
+      subscribe("job-empty-throw", {
+        onComplete: vi.fn(),
+        onFailed,
+        onStall: vi.fn(),
+      });
+
+      expect(() =>
+        FakeEventSource.instances[0].onmessage?.({
+          data: JSON.stringify({ type: "single", phase: "complete", result: {} }),
+        }),
+      ).toThrow("onFailed broke");
+      expect(onFailed).toHaveBeenCalledOnce();
+      expect(onFailed).toHaveBeenCalledWith({ reason: "invalidResponse" });
+      expect(vi.mocked(captureHandledError)).toHaveBeenCalledOnce();
+    });
+
+    it("ignores a completed frame of another kind", () => {
+      const onComplete = vi.fn();
+      const onFailed = vi.fn();
+      const cleanup = subscribe("job-batch-frame", {
+        onComplete,
+        onFailed,
+        onStall: vi.fn(),
+      });
+
+      FakeEventSource.instances[0].onmessage?.({
+        data: JSON.stringify({ type: "batch", phase: "complete" }),
+      });
+
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onFailed).not.toHaveBeenCalled();
+      expect(vi.mocked(captureHandledError)).not.toHaveBeenCalled();
+      expect(FakeEventSource.instances[0].readyState).toBe(FakeEventSource.OPEN);
+      cleanup();
+    });
+  },
+);
+
+// #1968: the stall timer is armed before the upload starts. touch() lets the
+// upload's own progress count as a sign of life, so a quiet stream can't cut
+// off a large PDF that is still uploading.
+describe("sign-pdf async progress: touch", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("restarts the stall timeout the way a heartbeat does", () => {
+    const onStall = vi.fn();
+    const { stop, touch } = subscribeSignPdfJobProgress("job-touch", {
+      onComplete: vi.fn(),
+      onFailed: vi.fn(),
+      onStall,
+    });
+
+    vi.advanceTimersByTime(4 * 60_000 + 59_000);
+    touch();
+    vi.advanceTimersByTime(2_000);
+    expect(onStall).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(4 * 60_000 + 59_000);
+    expect(onStall).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it("does nothing after stop", () => {
+    const onStall = vi.fn();
+    const { stop, touch } = subscribeSignPdfJobProgress("job-touch-stopped", {
+      onComplete: vi.fn(),
+      onFailed: vi.fn(),
+      onStall,
+    });
+
+    stop();
+    touch();
+    vi.advanceTimersByTime(10 * 60_000);
+
+    expect(onStall).not.toHaveBeenCalled();
+  });
+
+  it("does nothing after the stall already ended the run", () => {
+    const onStall = vi.fn();
+    const { touch } = subscribeSignPdfJobProgress("job-touch-stalled", {
+      onComplete: vi.fn(),
+      onFailed: vi.fn(),
+      onStall,
+    });
+
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(onStall).toHaveBeenCalledOnce();
+
+    touch();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(onStall).toHaveBeenCalledOnce();
   });
 });

@@ -30,6 +30,7 @@ export const it: TranslationKeys = {
     clear: "Cancella",
     copy: "Copia",
     copied: "Copiato!",
+    copyFailed: "Copia non riuscita",
     noResults: "Nessun risultato trovato",
     showLess: "Mostra meno",
     showMore: "Mostra altri {count}",
@@ -1246,7 +1247,13 @@ export const it: TranslationKeys = {
       name: "Costruttore di Pipeline",
       description: "Concatena più strumenti in un flusso di lavoro",
     },
-    processing: { canceled: "Elaborazione annullata" },
+    processing: {
+      canceled: "Elaborazione annullata",
+      cancelUnavailable: "Questa elaborazione non può essere annullata ora. È ancora in corso.",
+      cancelNotAllowed:
+        "Impossibile annullare: sei disconnesso o non hai il permesso di fermare questa elaborazione. È ancora in corso.",
+      cancelFailed: "Impossibile annullare l'elaborazione. È ancora in corso, riprova.",
+    },
     mediaPlayer: {
       unsupported: "Il tuo browser non supporta questo formato multimediale.",
     },
@@ -4341,7 +4348,7 @@ export const it: TranslationKeys = {
       dropDescription: "Trascina un'immagine qui per iniziare",
       openImageButton: "Apri immagine",
       newDocumentButton: "Nuovo documento",
-      pasteHint: "Oppure incolla dagli appunti (Ctrl+V)",
+      pasteHint: "Oppure incolla dagli appunti ({shortcut})",
     },
     mobile: {
       heading: "Si consiglia il desktop",
@@ -4587,8 +4594,8 @@ export const it: TranslationKeys = {
         median: "Mediana",
       },
       history: {
-        undoTitle: "Annulla (Ctrl+Z)",
-        redoTitle: "Ripeti (Ctrl+Maiusc+Z)",
+        undoTitle: "Annulla ({shortcut})",
+        redoTitle: "Ripeti ({shortcut})",
         empty: "Nessuna cronologia",
         unknown: "Sconosciuto",
         actions: {
@@ -4644,7 +4651,7 @@ export const it: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nuovo livello (Ctrl+Maiusc+N)",
+        newLayerTitle: "Nuovo livello ({shortcut})",
         blend: "Fusione",
         opacity: "Opacità",
         hideLayer: "Nascondi livello",
@@ -5465,6 +5472,7 @@ export const it: TranslationKeys = {
     fileCount: "{count} file",
     fileCountSingular: "{count} file",
     noFilesFound: "Nessun file trovato",
+    loadFailed: "Impossibile caricare i tuoi file.",
     selectFilePrompt: "Seleziona un file per visualizzare i dettagli",
     openFile: "Apri file",
     selectFile: "Seleziona file",

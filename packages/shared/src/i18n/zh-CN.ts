@@ -29,6 +29,7 @@ export const zhCN: TranslationKeys = {
     clear: "清除",
     copy: "复制",
     copied: "已复制！",
+    copyFailed: "复制失败",
     noResults: "未找到结果",
     showLess: "收起",
     showMore: "展开 {count} 项",
@@ -1013,7 +1014,12 @@ export const zhCN: TranslationKeys = {
       description: "安全解压 ZIP 文件并防御压缩炸弹。单文件压缩包直接返回文件。",
     },
     pipeline: { name: "Pipeline 构建器", description: "将多个工具串联为工作流" },
-    processing: { canceled: "处理已取消" },
+    processing: {
+      canceled: "处理已取消",
+      cancelUnavailable: "此处理现在无法取消，仍在进行。",
+      cancelNotAllowed: "无法取消：您已退出登录，或无权停止此处理。处理仍在进行。",
+      cancelFailed: "无法取消处理。处理仍在进行，请重试。",
+    },
     mediaPlayer: {
       unsupported: "您的浏览器不支持此媒体格式。",
     },
@@ -4060,7 +4066,7 @@ export const zhCN: TranslationKeys = {
       dropDescription: "拖放图片到此处开始编辑",
       openImageButton: "打开图片",
       newDocumentButton: "新建文档",
-      pasteHint: "或从剪贴板粘贴（Ctrl+V）",
+      pasteHint: "或从剪贴板粘贴（{shortcut}）",
     },
     mobile: {
       heading: "建议使用桌面设备",
@@ -4304,8 +4310,8 @@ export const zhCN: TranslationKeys = {
         median: "中间值",
       },
       history: {
-        undoTitle: "撤销（Ctrl+Z）",
-        redoTitle: "重做（Ctrl+Shift+Z）",
+        undoTitle: "撤销（{shortcut}）",
+        redoTitle: "重做（{shortcut}）",
         empty: "暂无历史记录",
         unknown: "未知",
         actions: {
@@ -4361,7 +4367,7 @@ export const zhCN: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "新建图层（Ctrl+Shift+N）",
+        newLayerTitle: "新建图层（{shortcut}）",
         blend: "混合",
         opacity: "不透明度",
         hideLayer: "隐藏图层",
@@ -5147,6 +5153,7 @@ export const zhCN: TranslationKeys = {
     fileCount: "{count} 个文件",
     fileCountSingular: "{count} 个文件",
     noFilesFound: "未找到文件",
+    loadFailed: "无法加载您的文件。",
     selectFilePrompt: "选择文件查看详情",
     openFile: "打开文件",
     selectFile: "选择文件",

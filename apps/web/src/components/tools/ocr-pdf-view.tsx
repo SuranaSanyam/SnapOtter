@@ -1,6 +1,7 @@
 import { Copy, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "@/contexts/i18n-context";
+import { useTimeouts } from "@/hooks/use-timeouts";
 import { copyToClipboard } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
 import { DocumentView } from "./document-view";
@@ -19,7 +20,8 @@ export function OcrPdfView() {
 
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
+  const later = useTimeouts();
 
   useEffect(() => {
     if (!processedUrl) {
@@ -48,10 +50,9 @@ export function OcrPdfView() {
     if (!text) return;
     // Falls back to execCommand on plain-http installs, where the async
     // Clipboard API does not exist (Sentry WEB-G).
-    if (await copyToClipboard(text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
+    const ok = await copyToClipboard(text);
+    setCopyStatus(ok ? "copied" : "failed");
+    later(() => setCopyStatus(null), 1500, "copyStatus");
   };
 
   return (
@@ -74,7 +75,11 @@ export function OcrPdfView() {
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
               <Copy className="h-3.5 w-3.5" />
-              {copied ? t.toolSettings["ocr-pdf-view"].copied : t.common.copy}
+              {copyStatus === "copied"
+                ? t.toolSettings["ocr-pdf-view"].copied
+                : copyStatus === "failed"
+                  ? t.common.copyFailed
+                  : t.common.copy}
             </button>
           )}
         </div>

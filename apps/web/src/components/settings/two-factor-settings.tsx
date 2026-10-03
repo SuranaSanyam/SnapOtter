@@ -2,6 +2,7 @@ import QRCodeStyling from "qr-code-styling";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/contexts/i18n-context";
 import { useAuth } from "@/hooks/use-auth";
+import { useTimeouts } from "@/hooks/use-timeouts";
 import { ApiError, apiErrorMessage, apiPost } from "@/lib/api";
 import { cn, copyToClipboard } from "@/lib/utils";
 
@@ -80,6 +81,7 @@ function QrCode({ uri }: { uri: string }) {
 
 export function TwoFactorSettings() {
   const { t } = useTranslation();
+  const later = useTimeouts();
   const { totpEnabled: initialEnabled } = useAuth();
   const [enabled, setEnabled] = useState(initialEnabled);
   const [step, setStep] = useState<Step>("idle");
@@ -156,8 +158,10 @@ export function TwoFactorSettings() {
     if (!enrollment) return;
     const ok = await copyToClipboard(enrollment.recoveryCodes.join("\n"));
     if (ok) {
+      // A retry that works takes down the earlier copy failure, not other messages.
+      setMessage((m) => (m?.text === t.settings.security.twoFactorCopyFailed ? null : m));
       setCodesCopied(true);
-      setTimeout(() => setCodesCopied(false), 2000);
+      later(() => setCodesCopied(false), 2000, "codesCopied");
     } else {
       setMessage({ type: "error", text: t.settings.security.twoFactorCopyFailed });
     }

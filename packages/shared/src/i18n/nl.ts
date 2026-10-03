@@ -31,6 +31,7 @@ export const nl: TranslationKeys = {
     clear: "Wissen",
     copy: "Kopiëren",
     copied: "Gekopieerd!",
+    copyFailed: "Kopiëren mislukt",
     noResults: "Geen resultaten gevonden",
     showLess: "Minder tonen",
     showMore: "{count} meer tonen",
@@ -1247,7 +1248,13 @@ export const nl: TranslationKeys = {
       name: "Pipeline-builder",
       description: "Meerdere tools koppelen tot een workflow",
     },
-    processing: { canceled: "Verwerking geannuleerd" },
+    processing: {
+      canceled: "Verwerking geannuleerd",
+      cancelUnavailable: "Deze verwerking kan nu niet worden geannuleerd. Hij loopt nog.",
+      cancelNotAllowed:
+        "Annuleren lukt niet: je bent afgemeld of mag deze verwerking niet stoppen. Hij loopt nog.",
+      cancelFailed: "Annuleren is mislukt. De verwerking loopt nog, probeer het opnieuw.",
+    },
     mediaPlayer: {
       unsupported: "Je browser ondersteunt dit mediaformaat niet.",
     },
@@ -4348,7 +4355,7 @@ export const nl: TranslationKeys = {
       dropDescription: "Sleep een afbeelding hierheen om te beginnen",
       openImageButton: "Afbeelding openen",
       newDocumentButton: "Nieuw document",
-      pasteHint: "Of plak vanuit het klembord (Ctrl+V)",
+      pasteHint: "Of plak vanuit het klembord ({shortcut})",
     },
     mobile: {
       heading: "Desktop aanbevolen",
@@ -4594,8 +4601,8 @@ export const nl: TranslationKeys = {
         median: "Mediaan",
       },
       history: {
-        undoTitle: "Ongedaan maken (Ctrl+Z)",
-        redoTitle: "Opnieuw (Ctrl+Shift+Z)",
+        undoTitle: "Ongedaan maken ({shortcut})",
+        redoTitle: "Opnieuw ({shortcut})",
         empty: "Nog geen geschiedenis",
         unknown: "Onbekend",
         actions: {
@@ -4651,7 +4658,7 @@ export const nl: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nieuwe laag (Ctrl+Shift+N)",
+        newLayerTitle: "Nieuwe laag ({shortcut})",
         blend: "Overvloeien",
         opacity: "Dekking",
         hideLayer: "Laag verbergen",
@@ -5468,6 +5475,7 @@ export const nl: TranslationKeys = {
     fileCount: "{count} bestanden",
     fileCountSingular: "{count} bestand",
     noFilesFound: "Geen bestanden gevonden",
+    loadFailed: "Je bestanden laden mislukt.",
     selectFilePrompt: "Selecteer een bestand om details te bekijken",
     openFile: "Bestand openen",
     selectFile: "Bestand selecteren",

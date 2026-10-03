@@ -30,6 +30,7 @@ export const hi: TranslationKeys = {
     clear: "साफ करें",
     copy: "कॉपी करें",
     copied: "कॉपी हो गया!",
+    copyFailed: "कॉपी विफल हुई",
     noResults: "कोई परिणाम नहीं मिला",
     showLess: "कम दिखाएं",
     showMore: "{count} और दिखाएं",
@@ -1063,7 +1064,13 @@ export const hi: TranslationKeys = {
       name: "Pipeline बिल्डर",
       description: "कई टूल्स को एक वर्कफ्लो में चेन करें",
     },
-    processing: { canceled: "प्रोसेसिंग रद्द हुई" },
+    processing: {
+      canceled: "प्रोसेसिंग रद्द हुई",
+      cancelUnavailable: "यह प्रोसेसिंग अभी रद्द नहीं की जा सकती। यह जारी है।",
+      cancelNotAllowed:
+        "रद्द नहीं हो सका: आप साइन आउट हैं या आपको यह प्रोसेसिंग रोकने की अनुमति नहीं है। यह जारी है।",
+      cancelFailed: "प्रोसेसिंग रद्द नहीं हो सकी। यह जारी है, फिर से कोशिश करें।",
+    },
     mediaPlayer: {
       unsupported: "आपका ब्राउज़र इस मीडिया फ़ॉर्मेट को सपोर्ट नहीं करता।",
     },
@@ -4131,7 +4138,7 @@ export const hi: TranslationKeys = {
       dropDescription: "शुरू करने के लिए यहां इमेज खींचें",
       openImageButton: "इमेज खोलें",
       newDocumentButton: "नया दस्तावेज़",
-      pasteHint: "या क्लिपबोर्ड से पेस्ट करें (Ctrl+V)",
+      pasteHint: "या क्लिपबोर्ड से पेस्ट करें ({shortcut})",
     },
     mobile: {
       heading: "डेस्कटॉप सुझाया गया",
@@ -4376,8 +4383,8 @@ export const hi: TranslationKeys = {
         median: "माध्यिका",
       },
       history: {
-        undoTitle: "पूर्ववत करें (Ctrl+Z)",
-        redoTitle: "पुनः करें (Ctrl+Shift+Z)",
+        undoTitle: "पूर्ववत करें ({shortcut})",
+        redoTitle: "पुनः करें ({shortcut})",
         empty: "अभी तक कोई इतिहास नहीं",
         unknown: "अज्ञात",
         actions: {
@@ -4433,7 +4440,7 @@ export const hi: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "नई लेयर (Ctrl+Shift+N)",
+        newLayerTitle: "नई लेयर ({shortcut})",
         blend: "ब्लेंड",
         opacity: "ओपेसिटी",
         hideLayer: "लेयर छुपाएं",
@@ -5230,6 +5237,7 @@ export const hi: TranslationKeys = {
     fileCount: "{count} फ़ाइलें",
     fileCountSingular: "{count} फ़ाइल",
     noFilesFound: "कोई फ़ाइल नहीं मिली",
+    loadFailed: "आपकी फ़ाइलें लोड नहीं हो सकीं।",
     selectFilePrompt: "विवरण देखने के लिए फ़ाइल चुनें",
     openFile: "फ़ाइल खोलें",
     selectFile: "फ़ाइल चुनें",

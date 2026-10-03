@@ -31,6 +31,7 @@ export const fr: TranslationKeys = {
     clear: "Effacer",
     copy: "Copier",
     copied: "Copié !",
+    copyFailed: "Échec de la copie",
     noResults: "Aucun résultat trouvé",
     showLess: "Afficher moins",
     showMore: "Afficher {count} de plus",
@@ -1251,7 +1252,13 @@ export const fr: TranslationKeys = {
       name: "Constructeur de Pipeline",
       description: "Enchaînez plusieurs outils dans un flux de travail",
     },
-    processing: { canceled: "Traitement annulé" },
+    processing: {
+      canceled: "Traitement annulé",
+      cancelUnavailable: "Ce traitement ne peut pas être annulé pour l'instant. Il continue.",
+      cancelNotAllowed:
+        "Annulation impossible : vous êtes déconnecté ou n'êtes pas autorisé à arrêter ce traitement. Il continue.",
+      cancelFailed: "Impossible d'annuler le traitement. Il continue, réessayez.",
+    },
     mediaPlayer: {
       unsupported: "Votre navigateur ne prend pas en charge ce format multimédia.",
     },
@@ -4353,7 +4360,7 @@ export const fr: TranslationKeys = {
       dropDescription: "Déposez une image ici pour commencer",
       openImageButton: "Ouvrir une image",
       newDocumentButton: "Nouveau document",
-      pasteHint: "Ou collez depuis le presse-papiers (Ctrl+V)",
+      pasteHint: "Ou collez depuis le presse-papiers ({shortcut})",
     },
     mobile: {
       heading: "Bureau recommandé",
@@ -4599,8 +4606,8 @@ export const fr: TranslationKeys = {
         median: "Médiane",
       },
       history: {
-        undoTitle: "Annuler (Ctrl+Z)",
-        redoTitle: "Rétablir (Ctrl+Maj+Z)",
+        undoTitle: "Annuler ({shortcut})",
+        redoTitle: "Rétablir ({shortcut})",
         empty: "Aucun historique pour le moment",
         unknown: "Inconnu",
         actions: {
@@ -4656,7 +4663,7 @@ export const fr: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nouveau calque (Ctrl+Maj+N)",
+        newLayerTitle: "Nouveau calque ({shortcut})",
         blend: "Fusion",
         opacity: "Opacité",
         hideLayer: "Masquer le calque",
@@ -5481,6 +5488,7 @@ export const fr: TranslationKeys = {
     fileCount: "{count} fichiers",
     fileCountSingular: "{count} fichier",
     noFilesFound: "Aucun fichier trouvé",
+    loadFailed: "Impossible de charger vos fichiers.",
     selectFilePrompt: "Sélectionnez un fichier pour voir les détails",
     openFile: "Ouvrir le fichier",
     selectFile: "Sélectionner le fichier",

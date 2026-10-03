@@ -1,11 +1,18 @@
 import type { TranslationKeys } from "@snapotter/shared";
-import { Check, Copy, Download, Search } from "lucide-react";
-import { useRef, useState } from "react";
+import { Check, Copy, Download, Search, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { ProgressCard } from "@/components/common/progress-card";
 import { useTranslation } from "@/contexts/i18n-context";
-import { formatHeaders } from "@/lib/api";
+import { useTimeouts } from "@/hooks/use-timeouts";
+import { failedAnswerMessage, formatHeaders } from "@/lib/api";
 import { appUrl, resolveServerUrls } from "@/lib/app-url";
 import { format, plural } from "@/lib/format";
+import {
+  jobFailureMessage,
+  MalformedResultError,
+  reportMalformedResult,
+} from "@/lib/progress-frames";
+import { reportRunEndFailure } from "@/lib/run-end-report";
 import { copyToClipboard } from "@/lib/utils";
 import { useFileStore } from "@/stores/file-store";
 
@@ -64,13 +71,65 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Send one file to the barcode-read API. */
+/** A sync 2xx answer from the barcode-read route. */
+interface BarcodeReadAnswer {
+  filename: string;
+  barcodes: BarcodeResult[];
+  /** The annotated image, or null when nothing was found. */
+  annotatedUrl: string | null;
+}
+
+function isBarcode(value: unknown): value is BarcodeResult {
+  if (value === null || typeof value !== "object") return false;
+  const { type, text } = value as { type?: unknown; text?: unknown };
+  return typeof type === "string" && typeof text === "string";
+}
+
+/**
+ * Parses a sync 2xx barcode-read answer. The route answers with decoded
+ * barcodes and no downloadUrl, so parseResultBody would turn every good answer
+ * away; this checks the fields the panel reads instead and throws a
+ * MalformedResultError otherwise (#1795). Nothing of the body goes into the
+ * error: a JSON SyntaxError quotes it.
+ */
+function parseBarcodeAnswer(text: string): BarcodeReadAnswer {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new MalformedResultError("notAnObject");
+  }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new MalformedResultError("notAnObject");
+  }
+  const { filename, barcodes, annotatedUrl } = body as Record<string, unknown>;
+  if (
+    typeof filename !== "string" ||
+    !Array.isArray(barcodes) ||
+    !barcodes.every(isBarcode) ||
+    !(annotatedUrl === null || (typeof annotatedUrl === "string" && annotatedUrl))
+  ) {
+    throw new MalformedResultError("notABarcodeResult");
+  }
+  return resolveServerUrls(body as BarcodeReadAnswer);
+}
+
+/**
+ * Send one file to the barcode-read API and hand a good answer to `land`. Only
+ * an answer that isn't one is the server's fault, and it gets reported
+ * (#1740). A throw from `land` is our own store write failing: it fails the
+ * file with the tracking message and is rethrown so it still surfaces (#1795,
+ * after #1354). `onStoppable` gets a stop that drops the request where it
+ * stands.
+ */
 function scanOneFile(
   file: File,
   tryHarder: boolean,
   onUploadProgress: (pct: number) => void,
+  land: (answer: BarcodeReadAnswer) => void,
+  onStoppable: (stop: () => void) => void,
   t: TranslationKeys,
-): Promise<{ filename: string; barcodes: BarcodeResult[]; annotatedUrl: string | null }> {
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -83,18 +142,40 @@ function scanOneFile(
       if (e.lengthComputable) onUploadProgress((e.loaded / e.total) * 100);
     };
 
+    // Set once the scan stops: an answer arriving after that, from a request
+    // the abort didn't reach, must not land on entries that aren't ours.
+    let stopped = false;
+
     xhr.onload = () => {
+      if (stopped) return;
       if (xhr.status >= 200 && xhr.status < 300) {
+        let answer: BarcodeReadAnswer;
         try {
-          resolve(resolveServerUrls(JSON.parse(xhr.responseText)));
-        } catch {
+          answer = parseBarcodeAnswer(xhr.responseText);
+        } catch (err) {
           reject(new Error(t.errors.invalidResponse));
+          reportMalformedResult(err, { status: xhr.status, toolId: "barcode-read" });
+          return;
         }
+        try {
+          land(answer);
+        } catch (err) {
+          reject(new Error(jobFailureMessage({ reason: "trackingFailed" }, t.errors)));
+          throw err;
+        }
+        resolve();
       } else {
         try {
           const body = JSON.parse(xhr.responseText);
           reject(
-            new Error(body.error || format(t.errors.failedWithStatus, { status: xhr.status })),
+            new Error(
+              failedAnswerMessage(
+                t,
+                body,
+                xhr.status,
+                format(t.errors.failedWithStatus, { status: xhr.status }),
+              ),
+            ),
           );
         } catch {
           reject(
@@ -109,6 +190,13 @@ function scanOneFile(
     };
     xhr.onerror = () => reject(new Error(t.errors.network));
     xhr.ontimeout = () => reject(new Error(t.errors.requestTimedOut));
+    // The error only settles the promise and never reaches the UI: the scan
+    // has already decided to write nothing more for this file.
+    onStoppable(() => {
+      stopped = true;
+      reject(new Error("Barcode scan stopped"));
+      xhr.abort();
+    });
 
     xhr.open("POST", appUrl("/api/v1/tools/image/barcode-read"));
     for (const [key, value] of formatHeaders()) {
@@ -124,13 +212,23 @@ export function BarcodeReadSettings() {
 
   const [tryHarder, setTryHarder] = useState(false);
   const [results, setResults] = useState<FileResult[]>([]);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [copiedAll, setCopiedAll] = useState(false);
+  const [rowCopy, setRowCopy] = useState<{ idx: number; ok: boolean } | null>(null);
+  const [allCopy, setAllCopy] = useState<"copied" | "failed" | null>(null);
+  const later = useTimeouts();
   const [progressPhase, setProgressPhase] = useState<"idle" | "uploading" | "processing">("idle");
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressStage, setProgressStage] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Unmounting stops the elapsed counter. The scan itself stops only once its
+  // files leave the store (see handleProcess).
+  useEffect(
+    () => () => {
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+    },
+    [],
+  );
 
   const handleProcess = async () => {
     if (files.length === 0) return;
@@ -153,53 +251,96 @@ export function BarcodeReadSettings() {
     const errors: string[] = [];
     const { updateEntry } = useFileStore.getState();
 
-    for (let i = 0; i < total; i++) {
-      const file = files[i];
-      const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
-      const fileBase = (i / total) * 100;
-      const fileShare = 100 / total;
-
+    // Leaving for another tool resets the file store, and opening library
+    // files replaces it. Either way the scan's files are gone, so it stops
+    // there: the request in flight is dropped, no more files are sent, and
+    // nothing is written to entries that now belong to someone else (#1932).
+    // This keys on the store rather than on unmount because the panel also
+    // unmounts whenever the mobile settings sheet closes, and that must not
+    // end the scan.
+    const runFiles = new Set(files);
+    let filesGone = false;
+    let stopInFlight: (() => void) | null = null;
+    const unsubscribe = useFileStore.subscribe((state) => {
+      if (filesGone || state.files.some((f) => runFiles.has(f))) return;
+      filesGone = true;
+      // This runs inside whoever replaced the files (the tool page's reset,
+      // the library's setFiles): a throw here must not break their update.
       try {
-        setProgressStage(
-          `${prefix}${format(t.toolSettings["barcode-read"].scanningFile, { name: file.name })}`,
-        );
-
-        const result = await scanOneFile(
-          file,
-          tryHarder,
-          (pct) => {
-            setProgressPhase("uploading");
-            setProgressPercent(fileBase + (pct / 100) * fileShare * 0.5);
-          },
-          t,
-        );
-
-        setProgressPhase("processing");
-        setProgressPercent(fileBase + fileShare);
-
-        allResults.push({
-          filename: result.filename,
-          barcodes: result.barcodes,
-        });
-
-        // Set annotated image as processedUrl for before/after view
-        if (result.annotatedUrl) {
-          updateEntry(i, {
-            processedUrl: result.annotatedUrl,
-            processedPreviewUrl: result.annotatedUrl,
-            processedFilename: `annotated-${file.name.replace(/\.[^.]+$/, "")}.png`,
-            status: "completed",
-            processedSize: null,
-          });
-        }
+        stopInFlight?.();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${file.name}: ${msg}`);
-        allResults.push({ filename: file.name, barcodes: [] });
+        reportRunEndFailure("Stopping a barcode scan whose files left failed", err, "barcode-read");
       }
+    });
+
+    try {
+      for (let i = 0; i < total; i++) {
+        if (filesGone) break;
+        const file = files[i];
+        const prefix = total > 1 ? `[${i + 1}/${total}] ` : "";
+        const fileBase = (i / total) * 100;
+        const fileShare = 100 / total;
+
+        try {
+          setProgressStage(
+            `${prefix}${format(t.toolSettings["barcode-read"].scanningFile, { name: file.name })}`,
+          );
+
+          await scanOneFile(
+            file,
+            tryHarder,
+            (pct) => {
+              setProgressPhase("uploading");
+              setProgressPercent(fileBase + (pct / 100) * fileShare * 0.5);
+            },
+            (answer) => {
+              setProgressPhase("processing");
+              setProgressPercent(fileBase + fileShare);
+
+              allResults.push({
+                filename: answer.filename,
+                barcodes: answer.barcodes,
+              });
+
+              // Set annotated image as processedUrl for before/after view
+              if (answer.annotatedUrl) {
+                updateEntry(i, {
+                  processedUrl: answer.annotatedUrl,
+                  processedPreviewUrl: answer.annotatedUrl,
+                  processedFilename: `annotated-${file.name.replace(/\.[^.]+$/, "")}.png`,
+                  status: "completed",
+                  processedSize: null,
+                });
+              }
+            },
+            (stop) => {
+              stopInFlight = stop;
+            },
+            t,
+          );
+        } catch (err) {
+          if (filesGone) break;
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${file.name}: ${msg}`);
+          // A throw while landing comes after this file's barcodes went in.
+          if (allResults.length === i) allResults.push({ filename: file.name, barcodes: [] });
+        } finally {
+          stopInFlight = null;
+        }
+      }
+    } finally {
+      unsubscribe();
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
 
-    if (elapsedRef.current) clearInterval(elapsedRef.current);
+    // The results and errors belong to files that are no longer there. The
+    // processing flag is still ours to clear: a replacing setFiles leaves it
+    // set, and nothing else can have started a run since.
+    if (filesGone) {
+      setProcessing(false);
+      setProgressPhase("idle");
+      return;
+    }
 
     if (errors.length === total) {
       setError(errors.join("; "));
@@ -217,10 +358,8 @@ export function BarcodeReadSettings() {
 
   const handleCopyOne = async (text: string, globalIdx: number) => {
     const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopiedIndex(globalIdx);
-      setTimeout(() => setCopiedIndex(null), 1500);
-    }
+    setRowCopy({ idx: globalIdx, ok });
+    later(() => setRowCopy(null), 1500, "rowCopy");
   };
 
   const handleCopyAll = async () => {
@@ -228,10 +367,8 @@ export function BarcodeReadSettings() {
       .flatMap((r) => r.barcodes.map((b) => `${FORMAT_LABELS[b.type] ?? b.type}: ${b.text}`))
       .join("\n");
     const ok = await copyToClipboard(allText);
-    if (ok) {
-      setCopiedAll(true);
-      setTimeout(() => setCopiedAll(false), 2000);
-    }
+    setAllCopy(ok ? "copied" : "failed");
+    later(() => setAllCopy(null), 2000, "allCopy");
   };
 
   const handleExportCsv = () => {
@@ -344,10 +481,16 @@ export function BarcodeReadSettings() {
                   onClick={handleCopyAll}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                 >
-                  {copiedAll ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {copiedAll
+                  {allCopy === "copied" ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                  {allCopy === "copied"
                     ? t.toolSettings["barcode-read"].copied
-                    : t.toolSettings["barcode-read"].copyAll}
+                    : allCopy === "failed"
+                      ? t.common.copyFailed
+                      : t.toolSettings["barcode-read"].copyAll}
                 </button>
               </div>
             )}
@@ -391,12 +534,18 @@ export function BarcodeReadSettings() {
                         type="button"
                         onClick={() => handleCopyOne(barcode.text, idx)}
                         className="shrink-0 p-1 rounded hover:bg-background/80 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 transition-opacity"
-                        title={t.toolSettings["barcode-read"].copyValue}
+                        title={
+                          rowCopy?.idx === idx && !rowCopy.ok
+                            ? t.common.copyFailed
+                            : t.toolSettings["barcode-read"].copyValue
+                        }
                       >
-                        {copiedIndex === idx ? (
+                        {rowCopy?.idx !== idx ? (
+                          <Copy className="h-3.5 w-3.5" />
+                        ) : rowCopy.ok ? (
                           <Check className="h-3.5 w-3.5 text-success-ink" />
                         ) : (
-                          <Copy className="h-3.5 w-3.5" />
+                          <X className="h-3.5 w-3.5 text-destructive" />
                         )}
                       </button>
                     </div>

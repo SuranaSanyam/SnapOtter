@@ -8,6 +8,7 @@
  * claimed type, which is what their previews branch on.
  */
 
+import { gzipSync } from "node:zlib";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, schema } from "../../../apps/api/src/db/index.js";
@@ -190,7 +191,8 @@ const SNIFFED_IMAGE_TYPES: [ext: string, mime: string][] = [
   ["heif", "image/heif"],
   ["psd", "image/vnd.adobe.photoshop"],
   ["dng", "image/x-adobe-dng"],
-  // The NEF, ARW, ORF and RW2 fixtures are over the suite's 10 MB upload cap.
+  // The NEF, ARW, ORF and RW2 fixtures are over the suite's 10 MB upload cap
+  // (ORF and RW2 run below, cut to their first megabyte).
   ["cr2", "image/x-canon-cr2"],
   ["ico", "image/x-icon"],
   ["cur", "image/x-icon"],
@@ -219,17 +221,43 @@ describe("library upload MIME type for every accepted image format (#1550)", () 
     expect(storedMimeType).toBe(mime);
   });
 
-  // The validator takes these on their name, with nothing in the bytes it can
-  // point to (#1550): TGA has no signature, RW2's isn't in its table, and an
-  // SVGZ is never opened. A name is a claim, so none of them earns an image
-  // type, real file or not.
+  // These used to be accepted on their name alone and stored untyped (#1782).
+  // The validator now finds each in the bytes: TGA by a header whose pixel
+  // data adds up, ORF and RW2 by their signatures, SVGZ by inflating its head.
   it.each([
-    ["sample.tga", readFixture(fixtures.image.formats("tga"))],
-    ["sample.svgz", readFixture(fixtures.image.formats("svgz"))],
-    // The first megabyte keeps it under the suite's upload cap; RAW isn't decoded here.
-    ["sample.rw2", readFixture(fixtures.image.formats("rw2")).subarray(0, 1024 * 1024)],
+    ["sample.tga", readFixture(fixtures.image.formats("tga")), "image/x-tga"],
+    ["sample.svgz", readFixture(fixtures.image.formats("svgz")), "image/svg+xml"],
+    // The first megabyte keeps these under the suite's upload cap; RAW isn't decoded here.
+    [
+      "sample.orf",
+      readFixture(fixtures.image.formats("orf")).subarray(0, 1024 * 1024),
+      "image/x-olympus-orf",
+    ],
+    [
+      "sample.rw2",
+      readFixture(fixtures.image.formats("rw2")).subarray(0, 1024 * 1024),
+      "image/x-panasonic-rw2",
+    ],
+  ])("stores a real %s, found in its bytes, as %s", async (filename, content, mime) => {
+    const { storedMimeType } = await uploadOne({
+      filename,
+      contentType: "application/octet-stream",
+      content,
+    });
+
+    expect(storedMimeType).toBe(mime);
+  });
+
+  // The validator still takes these on their name, with nothing in the bytes
+  // to back it (#1550). A name is a claim, so none of them earns an image type.
+  it.each([
     ["notes.tga", Buffer.from("plain text, not a picture\n")],
     ["notes.cr2", Buffer.from("plain text, not a picture\n")],
+    ["notes.orf", Buffer.from("plain text, not a picture\n")],
+    // Opens with ORF's big-endian signature, but points at no IFD.
+    ["mmorpg.orf", Buffer.from("MMORPG notes, not a picture\n")],
+    ["notes.rw2", Buffer.from("plain text, not a picture\n")],
+    ["notes.svgz", gzipSync("plain text, not a picture\n")],
   ])(
     "stores %s, typed only by its name, as application/octet-stream",
     async (filename, content) => {
@@ -242,6 +270,29 @@ describe("library upload MIME type for every accepted image format (#1550)", () 
       expect(storedMimeType).toBe("application/octet-stream");
     },
   );
+
+  // Text that happens to open with an ASCII image signature used to be stored
+  // as that image (#1859). Each signature now needs a header behind it.
+  it.each([
+    "BMW service notes",
+    "P3 meeting agenda",
+    "P5 report",
+    "P7 notes",
+    "FOVbar",
+    "SIMPLE question",
+    "SDPX draft",
+    "DDS notes",
+    "qoif",
+    "8BPS notes",
+  ])("stores text opening %j as application/octet-stream", async (text) => {
+    const { storedMimeType } = await uploadOne({
+      filename: "notes.txt",
+      contentType: "application/octet-stream",
+      content: Buffer.from(`${text}\nmore lines of plain text\n`),
+    });
+
+    expect(storedMimeType).toBe("application/octet-stream");
+  });
 
   // The extension only narrows a family the bytes already proved: it can't
   // turn HEIF bytes into some other format's type.
@@ -395,5 +446,27 @@ describe("save-result MIME type (#1349)", () => {
 
     expect(heifAsPng.mimeType).toBe("image/heif");
     expect(textAsTga.mimeType).toBe("application/octet-stream");
+  });
+
+  it("types a real TGA or SVGZ result from its bytes (#1782)", async () => {
+    const { created: parent } = await uploadOne({
+      filename: "parent.png",
+      contentType: "image/png",
+      content: PNG,
+    });
+
+    const tga = await saveResult(
+      parent.id,
+      "result.tga",
+      readFixture(fixtures.image.formats("tga")),
+    );
+    const svgz = await saveResult(
+      parent.id,
+      "result.svgz",
+      readFixture(fixtures.image.formats("svgz")),
+    );
+
+    expect(tga.mimeType).toBe("image/x-tga");
+    expect(svgz.mimeType).toBe("image/svg+xml");
   });
 });

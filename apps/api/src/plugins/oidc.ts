@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {} from "@fastify/cookie";
-import { ANALYTICS_EVENTS } from "@snapotter/shared";
+import { ANALYTICS_EVENTS, SafeError } from "@snapotter/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import * as oidc from "openid-client";
@@ -9,6 +9,7 @@ import { db, schema } from "../db/index.js";
 import { sharedRedis } from "../jobs/connection.js";
 import { trackEvent } from "../lib/analytics.js";
 import { auditFromRequest, sanitizeAuditInput } from "../lib/audit.js";
+import { isHttpsUrl } from "../lib/env.js";
 import { reportError } from "../lib/error-report.js";
 import {
   type ExternalAuthResult,
@@ -17,6 +18,11 @@ import {
   UsernameRaceExhaustedError,
 } from "../lib/external-auth-resolver.js";
 import { authAttempts } from "../lib/metrics.js";
+import {
+  oidcDiscoveryFault,
+  oidcTokenExchangeFault,
+  oidcTokenExchangeFaultCode,
+} from "../lib/oidc-faults.js";
 import { isSecureRequest } from "../lib/secure-cookie.js";
 import { createSessionToken } from "./auth.js";
 import type { ExternalMfaOutcome, MfaPolicy } from "./mfa.js";
@@ -56,8 +62,11 @@ async function getOrDiscoverConfig(): Promise<oidc.Configuration> {
     undefined,
     {
       // No request in scope here; this gates plain-http issuer URLs for dev
-      // setups, so only the declared origin matters.
-      execute: env.EXTERNAL_URL.startsWith("https") ? undefined : [oidc.allowInsecureRequests],
+      // setups, so only the declared origin matters. The scheme is parsed, so
+      // an "HTTPS://" spelling can't switch insecure discovery on (#1775).
+      // isHttpsUrl is false for an unparseable value, but with OIDC on the
+      // boot check in env.ts only lets an http(s) URL through.
+      execute: isHttpsUrl(env.EXTERNAL_URL) ? undefined : [oidc.allowInsecureRequests],
     },
   );
 
@@ -65,14 +74,48 @@ async function getOrDiscoverConfig(): Promise<oidc.Configuration> {
   return config;
 }
 
+// openid-client waits 30s by default; a logout click shouldn't. This is a
+// race rather than discovery's own `timeout` option because that option is
+// copied onto the cached Configuration, so a logout that filled the cache
+// would also cut the login token exchange down to 5s.
+const LOGOUT_DISCOVERY_TIMEOUT_MS = 5_000;
+
 /**
- * Returns the cached end_session_endpoint for RP-initiated logout,
- * or null if OIDC discovery has not been completed yet.
+ * Discovery for the logout path, bounded by LOGOUT_DISCOVERY_TIMEOUT_MS and
+ * with every failure wrapped as an operational SafeError: an unreachable,
+ * slow, or misconfigured IdP is an environment problem, not a SnapOtter bug.
+ * A discovery that outlives the timeout keeps running and still fills the
+ * cache for the next logout; Promise.race handles its late rejection.
  */
-export function getOidcEndSessionEndpoint(): string | null {
-  if (!cachedConfig) return null;
-  const metadata = cachedConfig.config.serverMetadata();
-  return metadata.end_session_endpoint ?? null;
+async function discoverForLogout(): Promise<oidc.Configuration> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SafeError("OIDC discovery timed out", { code: "OIDC_DISCOVERY_TIMEOUT" })),
+      LOGOUT_DISCOVERY_TIMEOUT_MS,
+    );
+  });
+  const discovery = getOrDiscoverConfig().catch((cause: unknown) => {
+    throw oidcDiscoveryFault(cause);
+  });
+  try {
+    return await Promise.race([discovery, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The provider's end_session_endpoint for RP-initiated logout, or null when
+ * it advertises none. Any cached discovery is used as is, however old, so a
+ * warm process never waits on the IdP to log out. A cold one (fresh after a
+ * restart, or a replica that has served no login yet) discovers first:
+ * returning null there would skip the IdP logout and leave its session open
+ * (#1787). Rejects with a SafeError when that discovery fails or times out.
+ */
+export async function getOidcEndSessionEndpoint(): Promise<string | null> {
+  const config = cachedConfig?.config ?? (await discoverForLogout());
+  return config.serverMetadata().end_session_endpoint ?? null;
 }
 
 // ── Username helpers ──────────────────────────────────────────────
@@ -126,23 +169,73 @@ function recordOidcFailure(): void {
   void trackEvent(ANALYTICS_EVENTS.AUTH_LOGIN_FAILED, { method: "oidc" });
 }
 
+/**
+ * Discovery for the login and callback routes. A failure is logged, with a
+ * message that names an http issuer on an https deployment rather than
+ * calling the IdP unreachable (#1775), and reported once as an operational
+ * SafeError (#1869): request.log has no Sentry bridge, and the caller turns
+ * the failure into a redirect, so the global handler never sees it. Returns
+ * the fault for the caller's redirect and audit row.
+ */
+async function discoverForSignIn(
+  request: FastifyRequest,
+): Promise<{ config: oidc.Configuration } | { fault: SafeError }> {
+  try {
+    return { config: await getOrDiscoverConfig() };
+  } catch (err) {
+    const fault = oidcDiscoveryFault(err);
+    request.log.error(
+      { err, code: fault.code },
+      fault.code === "OIDC_ISSUER_SCHEME_MISMATCH"
+        ? "OIDC discovery refused: OIDC_ISSUER_URL is http but EXTERNAL_URL is https, and openid-client refuses plain-http issuers for an https deployment"
+        : "OIDC discovery failed",
+    );
+    void reportError(fault, {
+      source: "http",
+      route: request.routeOptions?.url,
+      method: request.method,
+      subsystem: "oidc-login",
+    });
+    return { fault };
+  }
+}
+
 // ── OIDC Routes ───────────────────────────────────────────────────
+
+/**
+ * Log once at boot when the issuer is plain http (#1879). http issuers stay
+ * allowed, since LAN and dev setups rely on them, but the IdP traffic then
+ * runs unencrypted, or, on an https deployment, every sign-in is refused, and
+ * neither used to leave a trace in the log. A warning rather than reportError:
+ * this is configuration, not a fault. An issuer that doesn't parse is skipped
+ * here; discovery reports it on the first login.
+ */
+function warnIfPlainHttpIssuer(app: FastifyInstance): void {
+  let issuer: URL;
+  try {
+    issuer = new URL(env.OIDC_ISSUER_URL);
+  } catch {
+    return;
+  }
+  if (issuer.protocol !== "http:") return;
+  const message = isHttpsUrl(env.EXTERNAL_URL)
+    ? "OIDC_ISSUER_URL is plain http but EXTERNAL_URL is https, so every SSO sign-in is refused. Use an https URL for the identity provider."
+    : "OIDC_ISSUER_URL is plain http: OIDC discovery, the login code exchange, and the tokens SnapOtter receives travel unencrypted and can be read or altered on the network. Use an https URL for the identity provider.";
+  app.log.warn({ issuerHost: issuer.host }, message);
+}
 
 export async function oidcRoutes(app: FastifyInstance): Promise<void> {
   if (!env.OIDC_ENABLED) return;
+  warnIfPlainHttpIssuer(app);
 
   // GET /api/auth/oidc/login
   app.get(
     "/api/auth/oidc/login",
     { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      let config: oidc.Configuration;
-      try {
-        config = await getOrDiscoverConfig();
-      } catch (err) {
-        request.log.error({ err }, "OIDC discovery failed");
-        return redirectToLogin(reply, "oidc_provider_unreachable");
-      }
+      const discovered = await discoverForSignIn(request);
+      if ("fault" in discovered) return redirectToLogin(reply, "oidc_provider_unreachable");
+      const { config } = discovered;
 
       const state = oidc.randomState();
       const nonce = oidc.randomNonce();
@@ -234,13 +327,21 @@ export async function oidcRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // 2. Exchange authorization code for tokens
-      let config: oidc.Configuration;
-      try {
-        config = await getOrDiscoverConfig();
-      } catch (err) {
-        request.log.error({ err }, "OIDC discovery failed during callback");
+      const discovered = await discoverForSignIn(request);
+      if ("fault" in discovered) {
+        // Same trail as every other failed callback: the metric, the
+        // analytics event, and an audit row whose reason tells an admin which
+        // way discovery failed (discovery_failed, discovery_timeout, or
+        // issuer_scheme_mismatch).
+        recordOidcFailure();
+        await audit("OIDC_LOGIN_FAILED", {
+          reason: String(discovered.fault.code)
+            .replace(/^OIDC_/, "")
+            .toLowerCase(),
+        });
         return redirectToLogin(reply, "oidc_provider_unreachable");
       }
+      const { config } = discovered;
 
       let tokenResponse: Awaited<ReturnType<typeof oidc.authorizationCodeGrant>>;
       try {
@@ -257,6 +358,21 @@ export async function oidcRoutes(app: FastifyInstance): Promise<void> {
         });
       } catch (err) {
         request.log.error({ err }, "OIDC token exchange failed");
+        // An expired or replayed code (invalid_grant) or access_denied is the
+        // user's doing and stays out of Sentry. Anything else, an IdP that is
+        // down or answers 5xx, rejected client credentials, a redirect_uri the
+        // IdP doesn't accept, fails every SSO login and is reported once,
+        // under a constant message, so no code, state, or token reaches the
+        // event (#1869).
+        const faultCode = oidcTokenExchangeFaultCode(err);
+        if (faultCode) {
+          void reportError(oidcTokenExchangeFault(faultCode, err), {
+            source: "http",
+            route: request.routeOptions?.url,
+            method: request.method,
+            subsystem: "oidc-login",
+          });
+        }
         recordOidcFailure();
         await audit("OIDC_LOGIN_FAILED", { reason: "token_exchange_failed" });
         return redirectToLogin(reply, "oidc_auth_failed");
@@ -332,10 +448,8 @@ export async function oidcRoutes(app: FastifyInstance): Promise<void> {
 
       const resolvedUser = result.user;
 
-      // Unguarded on purpose: this read decides whether MFA gets checked at
-      // all, so a DB error here must fail the login, not silently skip MFA
-      // for an enrolled user. The try/catch below is scoped only to the
-      // optional MFA plugin/policy lookup, same as it always was.
+      // This read decides whether MFA gets checked at all, so a DB error here
+      // must fail the login, never silently skip MFA for an enrolled user.
       let dbUser: { totpEnabled: boolean } | undefined;
       try {
         [dbUser] = await db
@@ -347,6 +461,19 @@ export async function oidcRoutes(app: FastifyInstance): Promise<void> {
           { err, userId: resolvedUser.id },
           "OIDC callback: failed to read MFA enrollment status",
         );
+        // request.log has no Sentry bridge, and by catching here the error
+        // never reaches the global handler's reportError. Report explicitly
+        // so a database fault denying every SSO login is visible in triage.
+        // The subsystem tag tells it apart from the MFA-policy fault below:
+        // an operational fault groups by its code, so the two can share an
+        // issue.
+        void reportError(err, {
+          source: "http",
+          route: request.routeOptions?.url,
+          method: request.method,
+          statusCode: 503,
+          subsystem: "mfa-enrollment",
+        });
         recordOidcFailure();
         await audit("OIDC_LOGIN_FAILED", {
           userId: resolvedUser.id,

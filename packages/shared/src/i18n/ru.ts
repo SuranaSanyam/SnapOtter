@@ -31,6 +31,7 @@ export const ru: TranslationKeys = {
     clear: "Очистить",
     copy: "Копировать",
     copied: "Скопировано!",
+    copyFailed: "Не удалось скопировать",
     noResults: "Ничего не найдено",
     showLess: "Показать меньше",
     showMore: "Показать ещё {count}",
@@ -1244,7 +1245,13 @@ export const ru: TranslationKeys = {
       name: "Конструктор Pipeline",
       description: "Объединение нескольких инструментов в рабочий процесс",
     },
-    processing: { canceled: "Обработка отменена" },
+    processing: {
+      canceled: "Обработка отменена",
+      cancelUnavailable: "Эту обработку сейчас нельзя отменить. Она продолжается.",
+      cancelNotAllowed:
+        "Не удалось отменить: вы вышли из системы или вам нельзя останавливать эту обработку. Она продолжается.",
+      cancelFailed: "Не удалось отменить обработку. Она продолжается, попробуйте снова.",
+    },
     mediaPlayer: {
       unsupported: "Ваш браузер не поддерживает этот формат медиа.",
     },
@@ -4339,7 +4346,7 @@ export const ru: TranslationKeys = {
       dropDescription: "Перетащите изображение сюда для начала работы",
       openImageButton: "Открыть изображение",
       newDocumentButton: "Новый документ",
-      pasteHint: "Или вставьте из буфера обмена (Ctrl+V)",
+      pasteHint: "Или вставьте из буфера обмена ({shortcut})",
     },
     mobile: {
       heading: "Рекомендуется настольный ПК",
@@ -4584,8 +4591,8 @@ export const ru: TranslationKeys = {
         median: "Медиана",
       },
       history: {
-        undoTitle: "Отменить (Ctrl+Z)",
-        redoTitle: "Повторить (Ctrl+Shift+Z)",
+        undoTitle: "Отменить ({shortcut})",
+        redoTitle: "Повторить ({shortcut})",
         empty: "История пуста",
         unknown: "Неизвестно",
         actions: {
@@ -4641,7 +4648,7 @@ export const ru: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Новый слой (Ctrl+Shift+N)",
+        newLayerTitle: "Новый слой ({shortcut})",
         blend: "Режим",
         opacity: "Непрозр.",
         hideLayer: "Скрыть слой",
@@ -5458,6 +5465,7 @@ export const ru: TranslationKeys = {
     fileCount: "{count} файлов",
     fileCountSingular: "{count} файл",
     noFilesFound: "Файлы не найдены",
+    loadFailed: "Не удалось загрузить ваши файлы.",
     selectFilePrompt: "Выберите файл для просмотра информации",
     openFile: "Открыть файл",
     selectFile: "Выбрать файл",

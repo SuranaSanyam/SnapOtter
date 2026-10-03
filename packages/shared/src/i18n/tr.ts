@@ -30,6 +30,7 @@ export const tr: TranslationKeys = {
     clear: "Temizle",
     copy: "Kopyala",
     copied: "Kopyalandı!",
+    copyFailed: "Kopyalama başarısız",
     noResults: "Sonuç bulunamadı",
     showLess: "Daha az göster",
     showMore: "{count} tane daha göster",
@@ -1244,7 +1245,13 @@ export const tr: TranslationKeys = {
       name: "Pipeline Oluşturucu",
       description: "Birden fazla aracı bir iş akışında zincirleyin",
     },
-    processing: { canceled: "İşlem iptal edildi" },
+    processing: {
+      canceled: "İşlem iptal edildi",
+      cancelUnavailable: "Bu işlem şu anda iptal edilemez. Hâlâ sürüyor.",
+      cancelNotAllowed:
+        "İptal edilemedi: oturumunuz kapalı ya da bu işlemi durdurma izniniz yok. İşlem sürüyor.",
+      cancelFailed: "İşlem iptal edilemedi. Hâlâ sürüyor, tekrar deneyin.",
+    },
     mediaPlayer: {
       unsupported: "Tarayıcınız bu medya formatını desteklemiyor.",
     },
@@ -4336,7 +4343,7 @@ export const tr: TranslationKeys = {
       dropDescription: "Başlamak için buraya bir görüntü bırakın",
       openImageButton: "Görüntü Aç",
       newDocumentButton: "Yeni Belge",
-      pasteHint: "Veya panodan yapıştırın (Ctrl+V)",
+      pasteHint: "Veya panodan yapıştırın ({shortcut})",
     },
     mobile: {
       heading: "Masaüstü Önerilir",
@@ -4582,8 +4589,8 @@ export const tr: TranslationKeys = {
         median: "Medyan",
       },
       history: {
-        undoTitle: "Geri Al (Ctrl+Z)",
-        redoTitle: "Yinele (Ctrl+Shift+Z)",
+        undoTitle: "Geri Al ({shortcut})",
+        redoTitle: "Yinele ({shortcut})",
         empty: "Henüz geçmiş yok",
         unknown: "Bilinmiyor",
         actions: {
@@ -4639,7 +4646,7 @@ export const tr: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Yeni Katman (Ctrl+Shift+N)",
+        newLayerTitle: "Yeni Katman ({shortcut})",
         blend: "Karışım",
         opacity: "Opaklık",
         hideLayer: "Katmanı gizle",
@@ -5456,6 +5463,7 @@ export const tr: TranslationKeys = {
     fileCount: "{count} dosya",
     fileCountSingular: "{count} dosya",
     noFilesFound: "Dosya bulunamadı",
+    loadFailed: "Dosyalarınız yüklenemedi.",
     selectFilePrompt: "Ayrıntıları görmek için bir dosya seçin",
     openFile: "Dosyayı Aç",
     selectFile: "Dosya Seç",

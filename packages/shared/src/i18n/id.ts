@@ -30,6 +30,7 @@ export const id: TranslationKeys = {
     clear: "Hapus",
     copy: "Salin",
     copied: "Disalin!",
+    copyFailed: "Gagal menyalin",
     noResults: "Tidak ada hasil",
     showLess: "Tampilkan lebih sedikit",
     showMore: "Tampilkan {count} lainnya",
@@ -1242,7 +1243,14 @@ export const id: TranslationKeys = {
       name: "Pembuat Pipeline",
       description: "Rangkai beberapa alat menjadi alur kerja",
     },
-    processing: { canceled: "Pemrosesan dibatalkan" },
+    processing: {
+      canceled: "Pemrosesan dibatalkan",
+      cancelUnavailable:
+        "Pemrosesan ini tidak bisa dibatalkan sekarang. Pemrosesan masih berjalan.",
+      cancelNotAllowed:
+        "Tidak bisa membatalkan: Anda sudah keluar atau tidak diizinkan menghentikan pemrosesan ini. Pemrosesan masih berjalan.",
+      cancelFailed: "Gagal membatalkan pemrosesan. Pemrosesan masih berjalan, coba lagi.",
+    },
     mediaPlayer: {
       unsupported: "Browser Anda tidak mendukung format media ini.",
     },
@@ -4329,7 +4337,7 @@ export const id: TranslationKeys = {
       dropDescription: "Seret gambar ke sini untuk memulai",
       openImageButton: "Buka Gambar",
       newDocumentButton: "Dokumen Baru",
-      pasteHint: "Atau tempel dari clipboard (Ctrl+V)",
+      pasteHint: "Atau tempel dari clipboard ({shortcut})",
     },
     mobile: {
       heading: "Disarankan Desktop",
@@ -4575,8 +4583,8 @@ export const id: TranslationKeys = {
         median: "Median",
       },
       history: {
-        undoTitle: "Urungkan (Ctrl+Z)",
-        redoTitle: "Ulangi (Ctrl+Shift+Z)",
+        undoTitle: "Urungkan ({shortcut})",
+        redoTitle: "Ulangi ({shortcut})",
         empty: "Belum ada riwayat",
         unknown: "Tidak diketahui",
         actions: {
@@ -4632,7 +4640,7 @@ export const id: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Layer Baru (Ctrl+Shift+N)",
+        newLayerTitle: "Layer Baru ({shortcut})",
         blend: "Campuran",
         opacity: "Opasitas",
         hideLayer: "Sembunyikan layer",
@@ -5446,6 +5454,7 @@ export const id: TranslationKeys = {
     fileCount: "{count} file",
     fileCountSingular: "{count} file",
     noFilesFound: "Tidak ada file ditemukan",
+    loadFailed: "Gagal memuat file Anda.",
     selectFilePrompt: "Pilih file untuk melihat detail",
     openFile: "Buka File",
     selectFile: "Pilih File",

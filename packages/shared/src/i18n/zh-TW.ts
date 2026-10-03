@@ -30,6 +30,7 @@ export const zhTW: TranslationKeys = {
     clear: "清除",
     copy: "複製",
     copied: "已複製！",
+    copyFailed: "複製失敗",
     noResults: "找不到結果",
     showLess: "收合",
     showMore: "展開{count}項",
@@ -1013,7 +1014,12 @@ export const zhTW: TranslationKeys = {
       description: "安全解壓縮 ZIP 檔案並具備壓縮炸彈防護。單檔壓縮檔直接回傳該檔案。",
     },
     pipeline: { name: "Pipeline建構器", description: "將多個工具串聯為工作流程" },
-    processing: { canceled: "處理已取消" },
+    processing: {
+      canceled: "處理已取消",
+      cancelUnavailable: "此處理現在無法取消，仍在進行。",
+      cancelNotAllowed: "無法取消：您已登出，或無權停止此處理。處理仍在進行。",
+      cancelFailed: "無法取消處理。處理仍在進行，請重試。",
+    },
     mediaPlayer: {
       unsupported: "您的瀏覽器不支援此媒體格式。",
     },
@@ -4059,7 +4065,7 @@ export const zhTW: TranslationKeys = {
       dropDescription: "將影像拖放到此處開始編輯",
       openImageButton: "開啟影像",
       newDocumentButton: "新增文件",
-      pasteHint: "或從剪貼簿貼上（Ctrl+V）",
+      pasteHint: "或從剪貼簿貼上（{shortcut}）",
     },
     mobile: {
       heading: "建議使用桌面版",
@@ -4303,8 +4309,8 @@ export const zhTW: TranslationKeys = {
         median: "中位數",
       },
       history: {
-        undoTitle: "復原（Ctrl+Z）",
-        redoTitle: "重做（Ctrl+Shift+Z）",
+        undoTitle: "復原（{shortcut}）",
+        redoTitle: "重做（{shortcut}）",
         empty: "尚無歷史記錄",
         unknown: "未知",
         actions: {
@@ -4360,7 +4366,7 @@ export const zhTW: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "新增圖層（Ctrl+Shift+N）",
+        newLayerTitle: "新增圖層（{shortcut}）",
         blend: "混合",
         opacity: "不透明度",
         hideLayer: "隱藏圖層",
@@ -5147,6 +5153,7 @@ export const zhTW: TranslationKeys = {
     fileCount: "{count} 個檔案",
     fileCountSingular: "{count} 個檔案",
     noFilesFound: "找不到檔案",
+    loadFailed: "無法載入您的檔案。",
     selectFilePrompt: "選取檔案以檢視詳細資訊",
     openFile: "開啟檔案",
     selectFile: "選取檔案",

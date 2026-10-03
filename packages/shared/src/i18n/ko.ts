@@ -30,6 +30,7 @@ export const ko: TranslationKeys = {
     clear: "지우기",
     copy: "복사",
     copied: "복사되었습니다!",
+    copyFailed: "복사 실패",
     noResults: "결과를 찾을 수 없습니다",
     showLess: "접기",
     showMore: "{count}개 더 보기",
@@ -1186,7 +1187,13 @@ export const ko: TranslationKeys = {
         "ZIP 아카이브에서 폭탄 방지 기능으로 안전하게 파일 추출. 단일 파일 아카이브는 파일을 직접 반환합니다.",
     },
     pipeline: { name: "Pipeline 빌더", description: "여러 도구를 워크플로로 연결" },
-    processing: { canceled: "처리가 취소되었습니다" },
+    processing: {
+      canceled: "처리가 취소되었습니다",
+      cancelUnavailable: "지금은 이 처리를 취소할 수 없습니다. 처리는 계속 진행 중입니다.",
+      cancelNotAllowed:
+        "취소할 수 없습니다. 로그아웃되었거나 이 처리를 중지할 권한이 없습니다. 처리는 계속 진행 중입니다.",
+      cancelFailed: "처리를 취소하지 못했습니다. 처리는 계속 진행 중이니 다시 시도하세요.",
+    },
     mediaPlayer: {
       unsupported: "브라우저가 이 미디어 형식을 지원하지 않습니다.",
     },
@@ -4262,7 +4269,7 @@ export const ko: TranslationKeys = {
       dropDescription: "여기에 이미지를 드롭하여 시작하세요",
       openImageButton: "이미지 열기",
       newDocumentButton: "새 문서",
-      pasteHint: "또는 클립보드에서 붙여넣기 (Ctrl+V)",
+      pasteHint: "또는 클립보드에서 붙여넣기 ({shortcut})",
     },
     mobile: {
       heading: "데스크톱 환경 권장",
@@ -4507,8 +4514,8 @@ export const ko: TranslationKeys = {
         median: "중앙값",
       },
       history: {
-        undoTitle: "실행 취소 (Ctrl+Z)",
-        redoTitle: "다시 실행 (Ctrl+Shift+Z)",
+        undoTitle: "실행 취소 ({shortcut})",
+        redoTitle: "다시 실행 ({shortcut})",
         empty: "아직 기록이 없습니다",
         unknown: "알 수 없음",
         actions: {
@@ -4564,7 +4571,7 @@ export const ko: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "새 레이어 (Ctrl+Shift+N)",
+        newLayerTitle: "새 레이어 ({shortcut})",
         blend: "블렌드",
         opacity: "불투명도",
         hideLayer: "레이어 숨기기",
@@ -5363,6 +5370,7 @@ export const ko: TranslationKeys = {
     fileCount: "{count}개 파일",
     fileCountSingular: "{count}개 파일",
     noFilesFound: "파일을 찾을 수 없습니다",
+    loadFailed: "파일을 불러오지 못했습니다.",
     selectFilePrompt: "파일을 선택하여 상세 정보를 확인하세요",
     openFile: "파일 열기",
     selectFile: "파일 선택",

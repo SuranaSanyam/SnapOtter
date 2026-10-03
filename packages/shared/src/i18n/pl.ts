@@ -31,6 +31,7 @@ export const pl: TranslationKeys = {
     clear: "Wyczyść",
     copy: "Kopiuj",
     copied: "Skopiowano!",
+    copyFailed: "Kopiowanie nie powiodło się",
     noResults: "Nie znaleziono wyników",
     showLess: "Pokaż mniej",
     showMore: "Pokaż jeszcze {count}",
@@ -1244,7 +1245,13 @@ export const pl: TranslationKeys = {
       name: "Konstruktor Pipeline",
       description: "Łączenie wielu narzędzi w przepływ pracy",
     },
-    processing: { canceled: "Przetwarzanie anulowane" },
+    processing: {
+      canceled: "Przetwarzanie anulowane",
+      cancelUnavailable: "Tego przetwarzania nie można teraz anulować. Nadal trwa.",
+      cancelNotAllowed:
+        "Nie można anulować: wylogowano cię lub nie masz uprawnień, by zatrzymać to przetwarzanie. Nadal trwa.",
+      cancelFailed: "Nie udało się anulować przetwarzania. Nadal trwa, spróbuj ponownie.",
+    },
     mediaPlayer: {
       unsupported: "Twoja przeglądarka nie obsługuje tego formatu multimediów.",
     },
@@ -4338,7 +4345,7 @@ export const pl: TranslationKeys = {
       dropDescription: "Przeciągnij tutaj obraz, aby rozpocząć",
       openImageButton: "Otwórz obraz",
       newDocumentButton: "Nowy dokument",
-      pasteHint: "Lub wklej ze schowka (Ctrl+V)",
+      pasteHint: "Lub wklej ze schowka ({shortcut})",
     },
     mobile: {
       heading: "Zalecany komputer stacjonarny",
@@ -4584,8 +4591,8 @@ export const pl: TranslationKeys = {
         median: "Mediana",
       },
       history: {
-        undoTitle: "Cofnij (Ctrl+Z)",
-        redoTitle: "Ponów (Ctrl+Shift+Z)",
+        undoTitle: "Cofnij ({shortcut})",
+        redoTitle: "Ponów ({shortcut})",
         empty: "Brak historii",
         unknown: "Nieznane",
         actions: {
@@ -4641,7 +4648,7 @@ export const pl: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nowa warstwa (Ctrl+Shift+N)",
+        newLayerTitle: "Nowa warstwa ({shortcut})",
         blend: "Mieszanie",
         opacity: "Krycie",
         hideLayer: "Ukryj warstwę",
@@ -5463,6 +5470,7 @@ export const pl: TranslationKeys = {
     fileCount: "{count} plików",
     fileCountSingular: "{count} plik",
     noFilesFound: "Nie znaleziono plików",
+    loadFailed: "Nie udało się wczytać Twoich plików.",
     selectFilePrompt: "Wybierz plik, aby zobaczyć szczegóły",
     openFile: "Otwórz plik",
     selectFile: "Wybierz plik",

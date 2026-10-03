@@ -10,11 +10,15 @@ import { bundleName } from "@/lib/bundle-i18n";
 import { FeedbackCategoryError, feedbackCategoryOf } from "@/lib/feedback";
 import { format, formatFileSize } from "@/lib/format";
 import {
+  checkToolResult,
   frameFailure,
   type JobFailure,
   jobFailureMessage,
   type ProgressFrame,
+  parseResultBody,
+  reportMalformedResult,
 } from "@/lib/progress-frames";
+import { reportRunEndFailure } from "@/lib/run-end-report";
 import { generateId } from "@/lib/utils";
 import { useFeaturesStore } from "@/stores/features-store";
 import { useFileStore } from "@/stores/file-store";
@@ -108,6 +112,22 @@ export function subscribeEraseObjectJobProgress(
       } catch {
         return;
       }
+      // A completed frame with nothing to download is the server's bug, the
+      // twin of a sync 2xx body with no downloadUrl (#1740): the worker builds
+      // every result with one. It ends the run outside the catch below, so a
+      // throw while showing the error can't relabel it as ours (#1830).
+      let completed: Record<string, unknown> | null = null;
+      if (data.type === "single" && data.phase === "complete") {
+        try {
+          completed = checkToolResult<Record<string, unknown>>(data.result);
+        } catch (err) {
+          cleanup();
+          // Reported first: a throw from onFailed's store writes must not lose it.
+          reportMalformedResult(err, { toolId: "erase-object" });
+          handlers.onFailed({ reason: "invalidResponse" });
+          return;
+        }
+      }
       try {
         if (data.type === "heartbeat") {
           resetStall();
@@ -115,9 +135,9 @@ export function subscribeEraseObjectJobProgress(
         }
         if (data.type !== "single") return;
         resetStall();
-        if (data.phase === "complete" && data.result) {
+        if (completed) {
           cleanup();
-          handlers.onComplete(data.result);
+          handlers.onComplete(completed);
           return;
         }
         if (data.phase === "failed") {
@@ -212,6 +232,7 @@ export function EraseObjectSettings({
     file: File,
     maskBlob: Blob,
     onProgress: (percent: number) => void,
+    onStoppable: (stop: () => void) => void,
   ): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
       const clientJobId = generateId();
@@ -227,15 +248,34 @@ export function EraseObjectSettings({
         });
       };
 
+      // The request outlives a progress stream that gave up on it (a failed
+      // frame, or the stall timer, which runs from before the upload starts).
+      // Abort it then, and drop whatever it answers after, or a late 2xx
+      // flips the failed file back to completed once the batch has moved on
+      // (#1893).
+      const xhr = new XMLHttpRequest();
+      let abandoned = false;
+      const abandon = (err: Error) => {
+        abandoned = true;
+        xhr.abort();
+        reject(err);
+      };
+
       const stopProgress = subscribeEraseObjectJobProgress(clientJobId, {
         onProgress,
         onComplete: (r) => {
           applyResult(r);
           resolve();
         },
-        onFailed: (failure) => reject(new Error(jobFailureMessage(failure, t.errors))),
+        onFailed: (failure) => abandon(new Error(jobFailureMessage(failure, t.errors))),
         onStall: () =>
-          reject(new FeedbackCategoryError(t.toolSettings["erase-object"].stallBatch, "timeout")),
+          abandon(new FeedbackCategoryError(t.toolSettings["erase-object"].stallBatch, "timeout")),
+      });
+      // Drops this file where it stands. The error only settles the promise:
+      // the batch has already decided to write nothing more for it.
+      onStoppable(() => {
+        stopProgress();
+        abandon(new Error("Erase Object batch stopped"));
       });
 
       const maskFile = new File([maskBlob], "mask.png", { type: "image/png" });
@@ -247,18 +287,30 @@ export function EraseObjectSettings({
       formData.append("quality", String(quality));
       formData.append("qualityMode", qualityMode);
 
-      const xhr = new XMLHttpRequest();
       xhr.timeout = 600_000;
       xhr.onload = () => {
-        if (xhr.status === 202) return;
+        if (abandoned || xhr.status === 202) return;
         stopProgress();
         if (xhr.status >= 200 && xhr.status < 300) {
+          // Only a body that isn't a result is the server's fault, and it gets
+          // reported (#1740). A throw while landing a good one is our own store
+          // write failing: it fails this file the way the progress stream's
+          // handling error does, and still surfaces (#1734, after #1354).
+          let result: Record<string, unknown>;
           try {
-            applyResult(resolveServerUrls(JSON.parse(xhr.responseText)));
-            resolve();
-          } catch {
+            result = parseResultBody<Record<string, unknown>>(xhr.responseText);
+          } catch (err) {
             reject(new Error(t.errors.invalidResponse));
+            reportMalformedResult(err, { status: xhr.status, toolId: "erase-object" });
+            return;
           }
+          try {
+            applyResult(result);
+          } catch (err) {
+            reject(new Error(jobFailureMessage({ reason: "trackingFailed" }, t.errors)));
+            throw err;
+          }
+          resolve();
         } else {
           try {
             const body = JSON.parse(xhr.responseText);
@@ -277,10 +329,12 @@ export function EraseObjectSettings({
         }
       };
       xhr.onerror = () => {
+        if (abandoned) return;
         stopProgress();
         reject(new Error(t.errors.network));
       };
       xhr.ontimeout = () => {
+        if (abandoned) return;
         stopProgress();
         reject(new FeedbackCategoryError(t.errors.requestTimedOut, "timeout"));
       };
@@ -351,6 +405,15 @@ export function EraseObjectSettings({
       setProgressStage(null);
     };
 
+    // Same as the batch path (#1893): a stream that gave up on the run aborts
+    // its request, and anything the request answers after that is dropped.
+    const xhr = new XMLHttpRequest();
+    let abandoned = false;
+    const abandonRequest = () => {
+      abandoned = true;
+      xhr.abort();
+    };
+
     const stopProgress = subscribeEraseObjectJobProgress(clientJobId, {
       onProgress: (percent) => {
         setProgressPhase("processing");
@@ -363,11 +426,19 @@ export function EraseObjectSettings({
       },
       onFailed: (failure) => {
         progressCleanupRef.current = null;
-        setError(jobFailureMessage(failure, t.errors));
-        finishUi();
+        abandonRequest();
+        // setError is a store write, and the stream has already let go of the
+        // run: a throw from it must not skip finishUi and leave the run at
+        // processing for good (#1830). It still surfaces, after the teardown.
+        try {
+          setError(jobFailureMessage(failure, t.errors));
+        } finally {
+          finishUi();
+        }
       },
       onStall: () => {
         progressCleanupRef.current = null;
+        abandonRequest();
         setError(t.toolSettings["erase-object"].stall);
         finishUi();
       },
@@ -388,7 +459,6 @@ export function EraseObjectSettings({
       formData.append("saveMode", saveMode);
     }
 
-    const xhr = new XMLHttpRequest();
     xhr.timeout = 600_000;
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -401,16 +471,50 @@ export function EraseObjectSettings({
     };
     xhr.onload = () => {
       // 202 = async: the progress subscription drives completion via SSE.
-      if (xhr.status === 202) return;
+      if (abandoned || xhr.status === 202) return;
 
       stopProgress();
       progressCleanupRef.current = null;
 
       if (xhr.status >= 200 && xhr.status < 300) {
+        // Same split as the batch path in processOneFile (#1734).
+        let result: Record<string, unknown> | null = null;
         try {
-          applyResult(resolveServerUrls(JSON.parse(xhr.responseText)));
-        } catch {
+          result = parseResultBody<Record<string, unknown>>(xhr.responseText);
+        } catch (err) {
+          // Reported first: a throw from the store write below must not lose it.
+          reportMalformedResult(err, { status: xhr.status, toolId: "erase-object" });
           setError(t.errors.invalidResponse);
+        }
+        if (result) {
+          try {
+            applyResult(result);
+          } catch (err) {
+            // Both are store writes, so each is guarded on its own: a second
+            // throw from setError must not leave the run stuck at processing.
+            let teardownError: { cause: unknown } | null = null;
+            for (const teardown of [
+              () => setError(jobFailureMessage({ reason: "trackingFailed" }, t.errors)),
+              finishUi,
+            ]) {
+              try {
+                teardown();
+              } catch (teardownErr) {
+                console.error("Ending the run after a result handling error failed", teardownErr);
+                teardownError ??= { cause: teardownErr };
+              }
+            }
+            // Once per run, with the first throw: the console alone never
+            // reaches Sentry (#1882).
+            if (teardownError) {
+              reportRunEndFailure(
+                "Ending an Erase Object run after a result handling error failed",
+                teardownError.cause,
+                "erase-object",
+              );
+            }
+            throw err;
+          }
         }
       } else {
         try {
@@ -429,12 +533,14 @@ export function EraseObjectSettings({
       finishUi();
     };
     xhr.onerror = () => {
+      if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
       setError(t.errors.network);
       finishUi();
     };
     xhr.ontimeout = () => {
+      if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
       setError(t.toolSettings["erase-object"].timeoutOverloaded);
@@ -470,50 +576,146 @@ export function EraseObjectSettings({
     }
     if (work.length === 0) return;
 
-    setError(null);
-    setProcessing(true);
-    setProgressPhase("uploading");
-    setProgressPercent(0);
-    setElapsed(0);
-
-    const startTime = Date.now();
-    elapsedRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-
-    for (let wi = 0; wi < work.length; wi++) {
-      const { index, file, maskBlob } = work[wi];
-      const basePercent = (wi / work.length) * 100;
-      const sliceWeight = 100 / work.length;
-
-      setProgressPhase("processing");
-      setProgressPercent(basePercent);
-      setProgressStage(
-        format(t.toolSettings["erase-object"].erasingProgress, {
-          current: wi + 1,
-          total: work.length,
-        }),
-      );
-
-      useFileStore.getState().updateEntry(index, { status: "processing", error: null });
-
+    // Leaving for another tool resets the file store, and opening library
+    // files replaces it. Either way the batch's files are gone, so it stops
+    // there: the file in flight is dropped, no more are sent, and nothing is
+    // written to entries that now belong to someone else (#1894). This keys
+    // on the store rather than on unmount because the panel also unmounts
+    // whenever the mobile settings sheet closes, and that must not end the run.
+    const batchFiles = new Set(work.map((w) => w.file));
+    let filesGone = false;
+    let stopInFlight: (() => void) | null = null;
+    const unsubscribe = useFileStore.subscribe((state) => {
+      if (filesGone || state.entries.some((e) => batchFiles.has(e.file))) return;
+      filesGone = true;
+      // This runs inside whoever replaced the files (the tool page's reset,
+      // the library's setFiles): a throw here must not break their update.
       try {
-        await processOneFile(index, file, maskBlob, (pct) => {
-          setProgressPercent(basePercent + (pct / 100) * sliceWeight);
-        });
+        stopInFlight?.();
       } catch (err) {
-        useFileStore.getState().updateEntry(index, {
-          status: "failed",
-          error: err instanceof Error ? err.message : t.errors.processingFailedNoDetail,
-          errorCategory: feedbackCategoryOf(err),
-        });
+        reportRunEndFailure(
+          "Stopping an Erase Object batch whose files left failed",
+          err,
+          "erase-object",
+        );
       }
+    });
+
+    // A store write that throws anywhere in here (#1354) ends the batch: a
+    // store that can't record a file's outcome gets no more files sent to it.
+    // The teardown below runs whatever threw, so the run can't stay at
+    // processing with its elapsed counter ticking (#1810).
+    let batchError: { cause: unknown } | null = null;
+    try {
+      setError(null);
+      setProcessing(true);
+      setProgressPhase("uploading");
+      setProgressPercent(0);
+      setElapsed(0);
+
+      const startTime = Date.now();
+      elapsedRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+
+      for (let wi = 0; wi < work.length; wi++) {
+        if (filesGone) break;
+        const { index, file, maskBlob } = work[wi];
+        const basePercent = (wi / work.length) * 100;
+        const sliceWeight = 100 / work.length;
+
+        setProgressPhase("processing");
+        setProgressPercent(basePercent);
+        setProgressStage(
+          format(t.toolSettings["erase-object"].erasingProgress, {
+            current: wi + 1,
+            total: work.length,
+          }),
+        );
+
+        useFileStore.getState().updateEntry(index, { status: "processing", error: null });
+
+        try {
+          await processOneFile(
+            index,
+            file,
+            maskBlob,
+            (pct) => {
+              setProgressPercent(basePercent + (pct / 100) * sliceWeight);
+            },
+            (stop) => {
+              stopInFlight = stop;
+            },
+          );
+        } catch (err) {
+          if (filesGone) break;
+          useFileStore.getState().updateEntry(index, {
+            status: "failed",
+            error: err instanceof Error ? err.message : t.errors.processingFailedNoDetail,
+            errorCategory: feedbackCategoryOf(err),
+          });
+        } finally {
+          stopInFlight = null;
+        }
+      }
+    } catch (cause) {
+      batchError = { cause };
     }
 
-    if (elapsedRef.current) clearInterval(elapsedRef.current);
-    setProcessing(false);
-    setProgressPhase("idle");
-    setProgressStage(null);
+    // Each teardown write in its own guard, so one that throws can't skip
+    // the rest. The first error is rethrown once the run is over, where
+    // Sentry's global handler picks it up. A teardown throw behind a batch
+    // error would be lost to that rethrow, so it's reported here instead,
+    // once (#1812).
+    const trackingFailed = jobFailureMessage({ reason: "trackingFailed" }, t.errors);
+    let teardownError: { cause: unknown } | null = null;
+    for (const teardown of [
+      unsubscribe,
+      () => {
+        if (elapsedRef.current) clearInterval(elapsedRef.current);
+      },
+      // Still ours to clear when the files are gone: a replacing setFiles
+      // leaves it set, and nothing else can have started a run since.
+      () => setProcessing(false),
+      () => setProgressPhase("idle"),
+      () => setProgressStage(null),
+      // A batch that stopped early says so, as the single-file run does.
+      () => {
+        if (batchError) setError(trackingFailed);
+      },
+      // Last, after the run has ended (#1781): a file the stopped batch left
+      // at "processing" would pulse for good. Fails only this batch's files.
+      () => {
+        if (!batchError) return;
+        for (const { index } of work) {
+          if (useFileStore.getState().entries[index]?.status === "processing") {
+            useFileStore.getState().updateEntry(index, {
+              status: "failed",
+              error: trackingFailed,
+              errorCategory: null,
+            });
+          }
+        }
+      },
+    ]) {
+      try {
+        teardown();
+      } catch (err) {
+        console.error("Ending an Erase Object batch failed", err);
+        teardownError ??= { cause: err };
+      }
+    }
+    if (batchError) {
+      if (teardownError) {
+        reportRunEndFailure(
+          "Ending an Erase Object batch after a store error failed",
+          teardownError.cause,
+          "erase-object",
+        );
+      }
+      throw batchError.cause;
+    }
+    if (teardownError) throw teardownError.cause;
   };
 
   const hasFile = files.length > 0;

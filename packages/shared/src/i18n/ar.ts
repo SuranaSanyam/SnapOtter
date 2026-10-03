@@ -30,6 +30,7 @@ export const ar: TranslationKeys = {
     clear: "مسح",
     copy: "نسخ",
     copied: "تم النسخ!",
+    copyFailed: "فشل النسخ",
     noResults: "لا توجد نتائج",
     showLess: "عرض أقل",
     showMore: "عرض {count} إضافي",
@@ -1231,7 +1232,13 @@ export const ar: TranslationKeys = {
       name: "منشئ Pipeline",
       description: "ربط عدة أدوات في سير عمل واحد",
     },
-    processing: { canceled: "تم إلغاء المعالجة" },
+    processing: {
+      canceled: "تم إلغاء المعالجة",
+      cancelUnavailable: "لا يمكن إلغاء هذه المعالجة الآن. لا تزال مستمرة.",
+      cancelNotAllowed:
+        "تعذّر الإلغاء: سجّلت الخروج أو لا تملك صلاحية إيقاف هذه المعالجة. لا تزال مستمرة.",
+      cancelFailed: "تعذّر إلغاء المعالجة. لا تزال مستمرة، حاول مرة أخرى.",
+    },
     mediaPlayer: {
       unsupported: "متصفحك لا يدعم صيغة الوسائط هذه.",
     },
@@ -4301,7 +4308,7 @@ export const ar: TranslationKeys = {
       dropDescription: "اسحب صورة هنا للبدء",
       openImageButton: "فتح صورة",
       newDocumentButton: "مستند جديد",
-      pasteHint: "أو الصق من الحافظة (Ctrl+V)",
+      pasteHint: "أو الصق من الحافظة ({shortcut})",
     },
     mobile: {
       heading: "يُفضل استخدام سطح المكتب",
@@ -4546,8 +4553,8 @@ export const ar: TranslationKeys = {
         median: "الوسيط",
       },
       history: {
-        undoTitle: "تراجع (Ctrl+Z)",
-        redoTitle: "إعادة (Ctrl+Shift+Z)",
+        undoTitle: "تراجع ({shortcut})",
+        redoTitle: "إعادة ({shortcut})",
         empty: "لا يوجد سجل بعد",
         unknown: "غير معروف",
         actions: {
@@ -4603,7 +4610,7 @@ export const ar: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "طبقة جديدة (Ctrl+Shift+N)",
+        newLayerTitle: "طبقة جديدة ({shortcut})",
         blend: "المزج",
         opacity: "الشفافية",
         hideLayer: "إخفاء الطبقة",
@@ -5402,6 +5409,7 @@ export const ar: TranslationKeys = {
     fileCount: "{count} ملفات",
     fileCountSingular: "{count} ملف",
     noFilesFound: "لم يتم العثور على ملفات",
+    loadFailed: "تعذّر تحميل ملفاتك.",
     selectFilePrompt: "اختر ملفًا لعرض التفاصيل",
     openFile: "فتح الملف",
     selectFile: "اختيار الملف",

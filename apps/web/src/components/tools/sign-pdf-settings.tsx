@@ -1,4 +1,4 @@
-import { SafeError } from "@snapotter/shared";
+import { type FeedbackErrorCategory, SafeError } from "@snapotter/shared";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { ResultDownloadLink } from "@/components/common/result-download-link";
@@ -8,12 +8,15 @@ import { formatHeaders } from "@/lib/api";
 import { appUrl, resolveServerUrls } from "@/lib/app-url";
 import { format } from "@/lib/format";
 import {
+  checkToolResult,
   frameFailure,
   type JobFailure,
   jobFailureMessage,
   type ProgressFrame,
   parseResultBody,
+  reportMalformedResult,
 } from "@/lib/progress-frames";
+import { reportRunEndFailure } from "@/lib/run-end-report";
 import {
   addSignature,
   deleteSignature,
@@ -28,11 +31,27 @@ import { SignaturePad } from "./signature-pad";
 
 const SSE_STALL_TIMEOUT_MS = 5 * 60_000;
 
+/** A result checkToolResult passed: it always carries a download URL. */
+type SignResult = Record<string, unknown> & { downloadUrl: string };
+
 interface ProgressHandlers {
   onProgress?: (percent: number) => void;
-  onComplete: (result: Record<string, unknown>) => void;
+  onComplete: (result: SignResult) => void;
   onFailed: (failure: JobFailure) => void;
   onStall: () => void;
+}
+
+/** A live progress subscription. */
+export interface ProgressSubscription {
+  /** End it: close the stream and drop the stall timer. Safe to call twice. */
+  stop: () => void;
+  /**
+   * Count something outside the stream as a sign of life and restart the stall
+   * timer, the way a heartbeat does. The request's upload progress calls it, so
+   * a large PDF still uploading while the stream is quiet isn't called stalled
+   * (#1968). Does nothing once the subscription has ended.
+   */
+  touch: () => void;
 }
 
 /**
@@ -41,13 +60,13 @@ interface ProgressHandlers {
  * progress endpoint replays the terminal frame from Redis and, after that cache
  * expires, from the durable job record, so a job that finished while SSE was dead
  * still resolves) and arms a stall timeout that fails gracefully instead of
- * hanging at the last percent. Returns a cleanup the caller must invoke on sync
- * completion, error, or unmount.
+ * hanging at the last percent. The caller must `stop()` it on sync completion,
+ * error, or unmount, and should `touch()` it while the upload is moving.
  */
 export function subscribeSignPdfJobProgress(
   clientJobId: string,
   handlers: ProgressHandlers,
-): () => void {
+): ProgressSubscription {
   let es: EventSource | null = null;
   let stall: ReturnType<typeof setTimeout> | null = null;
   let done = false;
@@ -69,6 +88,8 @@ export function subscribeSignPdfJobProgress(
   };
 
   const resetStall = () => {
+    // A late touch after the run ended must not arm a stall that would end it twice.
+    if (done) return;
     if (stall) clearTimeout(stall);
     stall = setTimeout(() => {
       cleanup();
@@ -94,6 +115,23 @@ export function subscribeSignPdfJobProgress(
       } catch {
         return;
       }
+      // A completed frame with nothing to download is the server's bug, the
+      // twin of a sync 2xx body with no downloadUrl (#1740). It used to fall
+      // through to the progress branch and wait out the stall timer (#1885).
+      // It ends the run outside the catch below, so a throw while showing the
+      // error can't relabel it as ours (#1830).
+      let completed: SignResult | null = null;
+      if (data.type === "single" && data.phase === "complete") {
+        try {
+          completed = checkToolResult<SignResult>(data.result);
+        } catch (err) {
+          cleanup();
+          // Reported first: a throw from onFailed's store writes must not lose it.
+          reportMalformedResult(err, { toolId: "sign-pdf" });
+          handlers.onFailed({ reason: "invalidResponse" });
+          return;
+        }
+      }
       try {
         if (data.type === "heartbeat") {
           resetStall();
@@ -101,9 +139,9 @@ export function subscribeSignPdfJobProgress(
         }
         if (data.type !== "single") return;
         resetStall();
-        if (data.phase === "complete" && data.result) {
+        if (completed) {
           cleanup();
-          handlers.onComplete(data.result);
+          handlers.onComplete(completed);
           return;
         }
         if (data.phase === "failed") {
@@ -132,7 +170,7 @@ export function subscribeSignPdfJobProgress(
   document.addEventListener("visibilitychange", onVisible);
   open();
   resetStall();
-  return cleanup;
+  return { stop: cleanup, touch: resetStall };
 }
 
 /**
@@ -220,6 +258,9 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
     // the PDF is being signed; a result written to the live selection would
     // land on a bystander entry and the signed file would go unguarded.
     const capturedIndex = useFileStore.getState().selectedIndex;
+    // Which file that index held, so a failure finds its own entry even after
+    // a reorder, and leaves alone a fresh file that took the slot.
+    const capturedEntryId = useFileStore.getState().entries[capturedIndex]?.id;
 
     setError(null);
     setDownloadUrl(null);
@@ -247,6 +288,48 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       useFileStore.getState().setProcessing(false);
     };
 
+    /**
+     * Ends a run that failed. Besides the panel's error and endRun, the
+     * failure goes on the run's own entry, so the thumbnail strip marks it
+     * failed and the page offers its report-issue button (#1969). `category`
+     * is for messages that are translated, which can't be classified from
+     * their text.
+     *
+     * Like use-tool-processor's endSyncRun, each write is guarded on its own
+     * and the entry write always runs: a store listener that throws while the
+     * run ends must not leave the entry pending. The first teardown error is
+     * rethrown after it, so it still surfaces; the entry write itself logs and
+     * reports instead of throwing. The entry is found by id, so a reorder or a
+     * fresh file in the slot can't redirect the failure, and only the
+     * "pending" the run reset it to is failed: an entry already holding this
+     * run's result keeps it.
+     */
+    const failRun = (message: string, category?: FeedbackErrorCategory) => {
+      let teardown: { cause: unknown } | null = null;
+      for (const write of [() => setError(message), endRun]) {
+        try {
+          write();
+        } catch (cause) {
+          teardown ??= { cause };
+        }
+      }
+      try {
+        const { entries, updateEntry } = useFileStore.getState();
+        const index = entries.findIndex((e) => e.id === capturedEntryId);
+        if (index !== -1 && entries[index].status === "pending") {
+          updateEntry(index, { status: "failed", error: message, errorCategory: category ?? null });
+        }
+      } catch (err) {
+        console.error("Failing the Sign PDF run's entry failed", err);
+        // The console alone never reaches Sentry (#1882).
+        void captureHandledError(
+          new SafeError("Failing a Sign PDF run's entry failed", { kind: "bug", cause: err }),
+          { error_class: "bug", tool_id: "sign-pdf" },
+        );
+      }
+      if (teardown) throw teardown.cause;
+    };
+
     const exported = await canvas.exportPlacements().catch((cause: unknown) => {
       // Without this the run never ends: the button stays disabled and the
       // navigation guard warns for as long as the page is open. Reported
@@ -259,8 +342,7 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       return null;
     });
     if (!exported) {
-      setError(sp.exportFailed);
-      endRun();
+      failRun(sp.exportFailed, "processing_error");
       return;
     }
     const { pngs, placements } = exported;
@@ -274,18 +356,15 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
     /**
      * A fast sign answers twice: waitForJob returns 200 and the worker has
      * already published the terminal SSE frame, so both reach this panel for
-     * one run. Only the first writes, because a second write would reset the
-     * claim the first one earned.
+     * one run. Only the first settles it, because a second write would reset
+     * the claim the first one earned, and a result landing after the stream
+     * failed the run would put the link up beside that error (#1885).
      */
-    let landed = false;
-    const landResult = (r: Record<string, unknown>) => {
-      if (landed) return;
-      const url = typeof r.downloadUrl === "string" ? r.downloadUrl : null;
-      if (!url) {
-        setError(t.errors.invalidResponse);
-        return;
-      }
-      landed = true;
+    let settled = false;
+    const landResult = (r: SignResult) => {
+      if (settled) return;
+      settled = true;
+      const url = r.downloadUrl;
       useFileStore.getState().updateEntry(capturedIndex, {
         processedUrl: url,
         processedFilename: signedFilenameFrom(url),
@@ -303,21 +382,45 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       setDownloadUrl(url);
     };
 
-    const stopProgress = subscribeSignPdfJobProgress(clientJobId, {
+    // The request outlives a progress stream that gave up on the run (a failed
+    // frame, or the stall timer, which upload progress pushes back; see below).
+    // Abort it then, and drop whatever it answers after, or a late 200 puts the
+    // signed PDF's link up beside the stall error and a late network error,
+    // timeout, or 4xx replaces that error with its own (#1958).
+    const xhr = new XMLHttpRequest();
+    // Held so the unmount cleanup can abort it. Nothing clears the ref: abort
+    // on a request that is already done does nothing.
+    xhrRef.current = xhr;
+    let abandoned = false;
+    const abandonRequest = () => {
+      settled = true;
+      abandoned = true;
+      xhr.abort();
+    };
+
+    const subscription = subscribeSignPdfJobProgress(clientJobId, {
       onProgress: (percent) => setProgress(percent),
       onComplete: (r) => {
         landResult(r);
         finish();
       },
       onFailed: (failure) => {
-        setError(jobFailureMessage(failure, t.errors));
-        finish();
+        abandonRequest();
+        progressCleanupRef.current = null;
+        // A failure with a reason shows one of our translated messages; a
+        // server message is English and classifies from its text.
+        failRun(
+          jobFailureMessage(failure, t.errors),
+          "message" in failure ? undefined : "processing_error",
+        );
       },
       onStall: () => {
-        setError(sp.stall);
-        finish();
+        abandonRequest();
+        progressCleanupRef.current = null;
+        failRun(sp.stall, "timeout");
       },
     });
+    const stopProgress = subscription.stop;
     progressCleanupRef.current = stopProgress;
 
     const form = new FormData();
@@ -335,67 +438,76 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       form.append(`sig${i}`, new File([png], `sig${i}.png`, { type: "image/png" }));
     });
 
-    const xhr = new XMLHttpRequest();
-    // Held so the unmount cleanup can abort it. Nothing clears the ref: abort
-    // on a request that is already done does nothing.
-    xhrRef.current = xhr;
     xhr.timeout = 600_000;
+    // The stall timer is armed before the upload starts, and on a quiet stream
+    // only this keeps it from cutting off a large PDF that is still uploading
+    // (#1968). xhr.timeout still bounds the request as a whole.
+    xhr.upload.onprogress = () => subscription.touch();
     xhr.onload = () => {
       // 202 = async: the progress subscription drives completion via SSE.
-      if (xhr.status === 202) return;
+      if (abandoned || xhr.status === 202) return;
       stopProgress();
       progressCleanupRef.current = null;
       if (xhr.status >= 200 && xhr.status < 300) {
-        // Only a body that doesn't parse is the server's fault. A throw while
-        // landing a good result is our own store writes failing: it ends the
-        // run the way the progress stream's handling error does, and still
-        // surfaces (#1354, the sync twin of #1287).
-        let result: Record<string, unknown> | null = null;
+        // Only a body that isn't a result is the server's fault, and it gets
+        // reported (#1740). A throw while landing a good result is our own
+        // store writes failing: it ends the run the way the progress stream's
+        // handling error does, and still surfaces (#1354, the sync twin of
+        // #1287).
+        let result: SignResult | null = null;
         try {
-          result = parseResultBody<Record<string, unknown>>(xhr.responseText);
-        } catch {
-          setError(t.errors.invalidResponse);
+          result = parseResultBody<SignResult>(xhr.responseText);
+        } catch (err) {
+          failRun(t.errors.invalidResponse, "processing_error");
+          reportMalformedResult(err, { status: xhr.status, toolId: "sign-pdf" });
+          return;
         }
-        if (result) {
+        try {
+          landResult(result);
+        } catch (err) {
           try {
-            landResult(result);
-          } catch (err) {
-            try {
-              setError(jobFailureMessage({ reason: "trackingFailed" }, t.errors));
-              endRun();
-            } catch (teardownErr) {
-              console.error("Ending the run after a result handling error failed", teardownErr);
-            }
-            throw err;
+            failRun(jobFailureMessage({ reason: "trackingFailed" }, t.errors), "processing_error");
+          } catch (teardownErr) {
+            console.error("Ending the run after a result handling error failed", teardownErr);
+            // The console alone never reaches Sentry (#1882).
+            reportRunEndFailure(
+              "Ending a Sign PDF run after a result handling error failed",
+              teardownErr,
+              "sign-pdf",
+            );
           }
+          throw err;
         }
-      } else {
-        try {
-          const b = JSON.parse(xhr.responseText);
-          setError(
-            typeof b.error === "string"
-              ? b.error
-              : typeof b.details === "string"
-                ? b.details
-                : format(t.errors.failedWithStatus, { status: xhr.status }),
-          );
-        } catch {
-          setError(format(t.errors.processingFailedWithStatus, { status: xhr.status }));
-        }
+        endRun();
+        return;
       }
-      endRun();
+      let message: string;
+      try {
+        const b = JSON.parse(xhr.responseText);
+        message =
+          typeof b.error === "string"
+            ? b.error
+            : typeof b.details === "string"
+              ? b.details
+              : format(t.errors.failedWithStatus, { status: xhr.status });
+      } catch {
+        message = format(t.errors.processingFailedWithStatus, { status: xhr.status });
+      }
+      // A proxy's 413 has no JSON body, so its message is the translated
+      // status line; the category is what says the upload was too big.
+      failRun(message, xhr.status === 413 ? "upload_error" : undefined);
     };
     xhr.onerror = () => {
+      if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
-      setError(t.errors.network);
-      endRun();
+      failRun(t.errors.network, "upload_error");
     };
     xhr.ontimeout = () => {
+      if (abandoned) return;
       stopProgress();
       progressCleanupRef.current = null;
-      setError(sp.timeout);
-      endRun();
+      failRun(sp.timeout, "timeout");
     };
     xhr.open("POST", appUrl("/api/v1/tools/pdf/sign-pdf"));
     formatHeaders().forEach((value, key) => {

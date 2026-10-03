@@ -30,6 +30,7 @@ export const th: TranslationKeys = {
     clear: "ล้าง",
     copy: "คัดลอก",
     copied: "คัดลอกแล้ว!",
+    copyFailed: "คัดลอกไม่สำเร็จ",
     noResults: "ไม่พบผลลัพธ์",
     showLess: "แสดงน้อยลง",
     showMore: "แสดงอีก {count} รายการ",
@@ -1225,7 +1226,13 @@ export const th: TranslationKeys = {
       name: "ตัวสร้าง Pipeline",
       description: "เชื่อมต่อหลายเครื่องมือเป็นขั้นตอนทำงาน",
     },
-    processing: { canceled: "ยกเลิกการประมวลผลแล้ว" },
+    processing: {
+      canceled: "ยกเลิกการประมวลผลแล้ว",
+      cancelUnavailable: "ยกเลิกการประมวลผลนี้ในตอนนี้ไม่ได้ การประมวลผลยังดำเนินต่อไป",
+      cancelNotAllowed:
+        "ยกเลิกไม่ได้ เนื่องจากคุณออกจากระบบแล้วหรือไม่มีสิทธิ์หยุดการประมวลผลนี้ การประมวลผลยังดำเนินต่อไป",
+      cancelFailed: "ยกเลิกการประมวลผลไม่สำเร็จ การประมวลผลยังดำเนินต่อไป โปรดลองอีกครั้ง",
+    },
     mediaPlayer: {
       unsupported: "เบราว์เซอร์ของคุณไม่รองรับรูปแบบสื่อนี้",
     },
@@ -4279,7 +4286,7 @@ export const th: TranslationKeys = {
       dropDescription: "ลากภาพมาวางที่นี่เพื่อเริ่มต้น",
       openImageButton: "เปิดภาพ",
       newDocumentButton: "เอกสารใหม่",
-      pasteHint: "หรือวางจากคลิปบอร์ด (Ctrl+V)",
+      pasteHint: "หรือวางจากคลิปบอร์ด ({shortcut})",
     },
     mobile: {
       heading: "แนะนำให้ใช้คอมพิวเตอร์",
@@ -4524,8 +4531,8 @@ export const th: TranslationKeys = {
         median: "มัธยฐาน",
       },
       history: {
-        undoTitle: "เลิกทำ (Ctrl+Z)",
-        redoTitle: "ทำซ้ำ (Ctrl+Shift+Z)",
+        undoTitle: "เลิกทำ ({shortcut})",
+        redoTitle: "ทำซ้ำ ({shortcut})",
         empty: "ยังไม่มีประวัติ",
         unknown: "ไม่ทราบ",
         actions: {
@@ -4581,7 +4588,7 @@ export const th: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "เลเยอร์ใหม่ (Ctrl+Shift+N)",
+        newLayerTitle: "เลเยอร์ใหม่ ({shortcut})",
         blend: "ผสม",
         opacity: "ความทึบ",
         hideLayer: "ซ่อนเลเยอร์",
@@ -5370,6 +5377,7 @@ export const th: TranslationKeys = {
     fileCount: "{count} ไฟล์",
     fileCountSingular: "{count} ไฟล์",
     noFilesFound: "ไม่พบไฟล์",
+    loadFailed: "โหลดไฟล์ของคุณไม่สำเร็จ",
     selectFilePrompt: "เลือกไฟล์เพื่อดูรายละเอียด",
     openFile: "เปิดไฟล์",
     selectFile: "เลือกไฟล์",

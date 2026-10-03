@@ -30,6 +30,7 @@ export const vi: TranslationKeys = {
     clear: "Xóa",
     copy: "Sao chép",
     copied: "Đã sao chép!",
+    copyFailed: "Sao chép thất bại",
     noResults: "Không tìm thấy kết quả",
     showLess: "Thu gọn",
     showMore: "Hiển thị thêm {count}",
@@ -1244,7 +1245,13 @@ export const vi: TranslationKeys = {
       name: "Trình xây dựng Pipeline",
       description: "Kết nối nhiều công cụ thành một quy trình làm việc",
     },
-    processing: { canceled: "Đã hủy xử lý" },
+    processing: {
+      canceled: "Đã hủy xử lý",
+      cancelUnavailable: "Không thể hủy quá trình này lúc này. Quá trình vẫn đang chạy.",
+      cancelNotAllowed:
+        "Không thể hủy: bạn đã đăng xuất hoặc không có quyền dừng quá trình này. Quá trình vẫn đang chạy.",
+      cancelFailed: "Không thể hủy quá trình xử lý. Quá trình vẫn đang chạy, hãy thử lại.",
+    },
     mediaPlayer: {
       unsupported: "Trình duyệt của bạn không hỗ trợ định dạng media này.",
     },
@@ -4326,7 +4333,7 @@ export const vi: TranslationKeys = {
       dropDescription: "Kéo thả hình ảnh vào đây để bắt đầu",
       openImageButton: "Mở hình ảnh",
       newDocumentButton: "Tài liệu mới",
-      pasteHint: "Hoặc dán từ bộ nhớ tạm (Ctrl+V)",
+      pasteHint: "Hoặc dán từ bộ nhớ tạm ({shortcut})",
     },
     mobile: {
       heading: "Khuyến nghị dùng máy tính",
@@ -4571,8 +4578,8 @@ export const vi: TranslationKeys = {
         median: "Trung vị",
       },
       history: {
-        undoTitle: "Hoàn tác (Ctrl+Z)",
-        redoTitle: "Làm lại (Ctrl+Shift+Z)",
+        undoTitle: "Hoàn tác ({shortcut})",
+        redoTitle: "Làm lại ({shortcut})",
         empty: "Chưa có lịch sử",
         unknown: "Không rõ",
         actions: {
@@ -4628,7 +4635,7 @@ export const vi: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Lớp mới (Ctrl+Shift+N)",
+        newLayerTitle: "Lớp mới ({shortcut})",
         blend: "Hòa trộn",
         opacity: "Độ mờ",
         hideLayer: "Ẩn lớp",
@@ -5434,6 +5441,7 @@ export const vi: TranslationKeys = {
     fileCount: "{count} tệp",
     fileCountSingular: "{count} tệp",
     noFilesFound: "Không tìm thấy tệp",
+    loadFailed: "Không thể tải tệp của bạn.",
     selectFilePrompt: "Chọn tệp để xem chi tiết",
     openFile: "Mở tệp",
     selectFile: "Chọn tệp",

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import {
   ANALYTICS_EVENTS,
   type PasswordRule,
+  SafeError,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
   USERNAME_PATTERN,
@@ -16,6 +17,7 @@ import { sharedRedis } from "../jobs/connection.js";
 import { trackEvent } from "../lib/analytics.js";
 import { auditFromRequest, sanitizeAuditInput } from "../lib/audit.js";
 import { isEnterpriseFeatureEnabled } from "../lib/enterprise-feature.js";
+import { isHttpsUrl } from "../lib/env.js";
 import { reportError } from "../lib/error-report.js";
 import {
   checkLoginThrottle,
@@ -696,19 +698,52 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       if (session?.idToken && env.OIDC_ENABLED) {
         // A null endpoint means a local-only logout without a fault: the IdP
-        // advertises no end_session_endpoint, or this process hasn't run
-        // discovery yet (#1787). Neither throws. A throw is a fault (oidc.js
-        // is imported at boot, so this is a guard): the session below is
-        // still destroyed, but the IdP session stays open, so report it.
+        // advertises no end_session_endpoint. A process that hasn't run
+        // discovery yet runs it now instead of skipping the IdP (#1787). A
+        // throw is a fault (a failed or timed-out discovery, or a broken
+        // import): the session below is still destroyed, but the IdP session
+        // stays open, so report it.
         try {
           const { getOidcEndSessionEndpoint } = await import("./oidc.js");
-          const endSessionEndpoint = getOidcEndSessionEndpoint();
+          const endSessionEndpoint = await getOidcEndSessionEndpoint();
           if (endSessionEndpoint) {
-            const params = new URLSearchParams({
-              id_token_hint: session.idToken,
-              post_logout_redirect_uri: `${env.EXTERNAL_URL}/login`,
-            });
-            logoutUrl = `${endSessionEndpoint}?${params.toString()}`;
+            // Set on the parsed URL rather than appending "?...": some IdPs
+            // advertise the endpoint with a query already on it (Azure AD
+            // B2C's `?p=<user flow>`), which has to survive. set() also
+            // replaces any copy of our two parameters the endpoint carries.
+            // An endpoint that isn't a URL (a relative path, any garbage) is
+            // an IdP fault like a bad scheme (#1788). Check it first rather
+            // than letting new URL throw: its TypeError carries the raw
+            // endpoint in an enumerable `input` and classifies as a bug. No
+            // `cause`, which would carry it again (#1887). canParse applies
+            // the same whitespace trimming as new URL.
+            if (!URL.canParse(endSessionEndpoint)) {
+              throw new SafeError("OIDC end_session_endpoint is not a valid URL", {
+                code: "OIDC_END_SESSION_INVALID",
+              });
+            }
+            const url = new URL(endSessionEndpoint);
+            // Discovery takes any string as end_session_endpoint, and the web
+            // app navigates to logoutUrl, so a javascript: or data: endpoint
+            // would run in our origin (#1855). Plain http only where discovery
+            // itself may use it (an http EXTERNAL_URL, i.e. a dev setup); on
+            // https it would also send the ID token in the clear. The message
+            // is constant so no part of the endpoint reaches Sentry; only the
+            // local log names the scheme, so an operator can tell an http
+            // endpoint on an https deployment from a hostile one.
+            const allowed = isHttpsUrl(env.EXTERNAL_URL) ? ["https:"] : ["https:", "http:"];
+            if (!allowed.includes(url.protocol)) {
+              request.log.warn(
+                { scheme: url.protocol.slice(0, 32), userId: session.userId },
+                "logout: OIDC end_session_endpoint scheme not allowed",
+              );
+              throw new SafeError("OIDC end_session_endpoint has an unsupported scheme", {
+                code: "OIDC_END_SESSION_SCHEME",
+              });
+            }
+            url.searchParams.set("id_token_hint", session.idToken);
+            url.searchParams.set("post_logout_redirect_uri", `${env.EXTERNAL_URL}/login`);
+            logoutUrl = url.toString();
           }
         } catch (err) {
           request.log.error(

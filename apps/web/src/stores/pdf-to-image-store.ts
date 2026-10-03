@@ -1,5 +1,6 @@
+import { en, type TranslationKeys } from "@snapotter/shared";
 import { create } from "zustand";
-import { formatHeaders } from "@/lib/api";
+import { failedAnswerMessage, formatHeaders } from "@/lib/api";
 import { appUrl, resolveServerUrls } from "@/lib/app-url";
 
 export interface PageResult {
@@ -44,8 +45,9 @@ interface PdfToImageState {
   togglePage: (page: number) => void;
   selectAllPages: () => void;
   deselectAllPages: () => void;
-  loadPreview: (file: File) => Promise<void>;
-  convert: () => Promise<void>;
+  /** `t` words a failed answer (#1915); the store has no locale of its own. */
+  loadPreview: (file: File, t?: TranslationKeys) => Promise<void>;
+  convert: (t?: TranslationKeys) => Promise<void>;
   reset: () => void;
 }
 
@@ -122,6 +124,9 @@ const initialState = {
   zipSize: null as number | null,
 };
 
+/** Counts loadPreview calls so only the newest one writes its outcome. */
+let latestPreviewRequest = 0;
+
 export const usePdfToImageStore = create<PdfToImageState>((set, get) => ({
   ...initialState,
 
@@ -185,7 +190,11 @@ export const usePdfToImageStore = create<PdfToImageState>((set, get) => ({
     set({ selectedPages: new Set<number>(), pages: "none" });
   },
 
-  loadPreview: async (file) => {
+  loadPreview: async (file, t = en) => {
+    const request = ++latestPreviewRequest;
+    // A slower answer for a file the viewer has since moved off must not
+    // overwrite the newer request's pages, error, or spinner.
+    const isLatest = () => request === latestPreviewRequest;
     set({ loadingPreview: true, error: null });
     try {
       const formData = new FormData();
@@ -196,28 +205,32 @@ export const usePdfToImageStore = create<PdfToImageState>((set, get) => ({
         body: formData,
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Failed: ${res.status}`);
+        const body = await res.json().catch(() => null);
+        throw new Error(failedAnswerMessage(t, body, res.status, `Failed: ${res.status}`));
       }
       const data = resolveServerUrls(await res.json());
+      if (!isLatest()) return;
       set({
         pageCount: data.pageCount,
         thumbnails: data.thumbnails,
         selectedPages: new Set(Array.from({ length: data.pageCount }, (_, i) => i + 1)),
       });
     } catch (err) {
+      if (!isLatest()) return;
+      // `file` stays: the panel asks for a preview whenever the selected file
+      // differs from it, so clearing it here asked again on every render
+      // (#1954). A null pageCount keeps Convert disabled.
       set({
         error: err instanceof Error ? err.message : "Failed to read PDF",
-        file: null,
         pageCount: null,
         thumbnails: [],
       });
     } finally {
-      set({ loadingPreview: false });
+      if (isLatest()) set({ loadingPreview: false });
     }
   },
 
-  convert: async () => {
+  convert: async (t = en) => {
     const { file, format, dpi, quality, colorMode, pages, selectedPages } = get();
     if (!file) return;
     set({ processing: true, error: null, results: null, zipUrl: null, zipSize: null });
@@ -238,8 +251,10 @@ export const usePdfToImageStore = create<PdfToImageState>((set, get) => ({
         body: formData,
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Conversion failed: ${res.status}`);
+        const body = await res.json().catch(() => null);
+        throw new Error(
+          failedAnswerMessage(t, body, res.status, `Conversion failed: ${res.status}`),
+        );
       }
       const data = resolveServerUrls(await res.json());
       set({ results: data.pages, zipUrl: data.zipUrl, zipSize: data.zipSize });

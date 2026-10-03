@@ -31,6 +31,7 @@ export const es: TranslationKeys = {
     clear: "Limpiar",
     copy: "Copiar",
     copied: "¡Copiado!",
+    copyFailed: "Error al copiar",
     noResults: "No se encontraron resultados",
     showLess: "Mostrar menos",
     showMore: "Mostrar {count} más",
@@ -1230,7 +1231,13 @@ export const es: TranslationKeys = {
       name: "Constructor de Pipeline",
       description: "Encadena múltiples herramientas en un flujo de trabajo",
     },
-    processing: { canceled: "Procesamiento cancelado" },
+    processing: {
+      canceled: "Procesamiento cancelado",
+      cancelUnavailable: "Este proceso no se puede cancelar ahora. Sigue en curso.",
+      cancelNotAllowed:
+        "No se pudo cancelar: has cerrado sesión o no tienes permiso para detener este proceso. Sigue en curso.",
+      cancelFailed: "No se pudo cancelar el proceso. Sigue en curso, inténtalo de nuevo.",
+    },
     mediaPlayer: {
       unsupported: "Tu navegador no admite este formato de medios.",
     },
@@ -4330,7 +4337,7 @@ export const es: TranslationKeys = {
       dropDescription: "Arrastra una imagen aquí para comenzar",
       openImageButton: "Abrir imagen",
       newDocumentButton: "Nuevo documento",
-      pasteHint: "O pega desde el portapapeles (Ctrl+V)",
+      pasteHint: "O pega desde el portapapeles ({shortcut})",
     },
     mobile: {
       heading: "Se recomienda escritorio",
@@ -4576,8 +4583,8 @@ export const es: TranslationKeys = {
         median: "Mediana",
       },
       history: {
-        undoTitle: "Deshacer (Ctrl+Z)",
-        redoTitle: "Rehacer (Ctrl+Mayús+Z)",
+        undoTitle: "Deshacer ({shortcut})",
+        redoTitle: "Rehacer ({shortcut})",
         empty: "Aún no hay historial",
         unknown: "Desconocido",
         actions: {
@@ -4633,7 +4640,7 @@ export const es: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nueva capa (Ctrl+Mayús+N)",
+        newLayerTitle: "Nueva capa ({shortcut})",
         blend: "Mezcla",
         opacity: "Opacidad",
         hideLayer: "Ocultar capa",
@@ -5459,6 +5466,7 @@ export const es: TranslationKeys = {
     fileCount: "{count} archivos",
     fileCountSingular: "{count} archivo",
     noFilesFound: "No se encontraron archivos",
+    loadFailed: "No se pudieron cargar tus archivos.",
     selectFilePrompt: "Selecciona un archivo para ver detalles",
     openFile: "Abrir archivo",
     selectFile: "Seleccionar archivo",

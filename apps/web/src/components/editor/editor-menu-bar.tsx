@@ -3,15 +3,12 @@
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { copyMergedToClipboard } from "@/components/editor/copy-merged";
 import { useTranslation } from "@/contexts/i18n-context";
+import { formatShortcut } from "@/hooks/use-keyboard-shortcuts";
+import { hotkeysModIsMeta } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
-
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
-
-function mod(label: string): string {
-  return IS_MAC ? label.replace("Ctrl+", "⌘").replace("Shift+", "⇧") : label;
-}
 
 export interface MenuBarCallbacks {
   onNewDocument: () => void;
@@ -47,6 +44,10 @@ interface MenuDef {
 function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
   const { t } = useTranslation();
   const m = t.editor.menu;
+  // The editor's shortcuts are react-hotkeys-hook bindings, so `mod` follows
+  // that library's rule (Ctrl on an iPad's mobile user agent, for one).
+  const modIsMeta = hotkeysModIsMeta();
+  const hint = (keys: string) => formatShortcut(keys, modIsMeta);
   const sourceImageUrl = useEditorStore((s) => s.sourceImageUrl);
   const layers = useEditorStore((s) => s.layers);
   const activeLayerId = useEditorStore((s) => s.activeLayerId);
@@ -97,36 +98,38 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
     useEditorStore.temporal.getState().redo();
   }, []);
 
+  // A row's `shortcut` must name a key use-editor-shortcuts.ts binds to that
+  // same command (#1943). Rows with no binding show no hint: Ctrl+N and Ctrl+W
+  // never reach the page in Chrome anyway, so New and Close couldn't take them.
   return [
     {
       label: m.file.label,
       testId: "file",
       items: [
-        { id: "new", label: m.file.new, shortcut: mod("Ctrl+N"), action: callbacks.onNewDocument },
-        { id: "open", label: m.file.open, shortcut: mod("Ctrl+O"), action: callbacks.onOpenImage },
+        { id: "new", label: m.file.new, action: callbacks.onNewDocument },
+        { id: "open", label: m.file.open, action: callbacks.onOpenImage },
         {
           id: "save",
           label: m.file.save,
-          shortcut: mod("Ctrl+S"),
+          shortcut: hint("mod+S"),
           action: callbacks.onSave,
           dividerAfter: true,
         },
         {
           id: "export-as",
           label: m.file.exportAs,
-          shortcut: mod("Ctrl+Shift+E"),
+          // mod+shift+e is Flatten All; export listens on mod+shift+s.
+          shortcut: hint("mod+Shift+S"),
           action: callbacks.onExport,
         },
         {
           id: "quick-export-as-png",
           label: m.file.quickExportPng,
-          shortcut: mod("Ctrl+Shift+P"),
           action: callbacks.onExport,
         },
         {
           id: "close",
           label: m.file.close,
-          shortcut: mod("Ctrl+W"),
           disabled: !hasImage,
           action: () => {
             if (hasImage) {
@@ -145,27 +148,27 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
       label: m.edit.label,
       testId: "edit",
       items: [
-        { id: "undo", label: m.edit.undo, shortcut: mod("Ctrl+Z"), action: undo },
+        { id: "undo", label: m.edit.undo, shortcut: hint("mod+Z"), action: undo },
         {
           id: "redo",
           label: m.edit.redo,
-          shortcut: mod("Ctrl+Shift+Z"),
+          shortcut: hint("mod+Shift+Z"),
           action: redo,
           dividerAfter: true,
         },
-        { id: "cut", label: m.edit.cut, shortcut: mod("Ctrl+X"), action: cutObjects },
-        { id: "copy", label: m.edit.copy, shortcut: mod("Ctrl+C"), action: copyObjects },
+        { id: "cut", label: m.edit.cut, shortcut: hint("mod+X"), action: cutObjects },
+        { id: "copy", label: m.edit.copy, shortcut: hint("mod+C"), action: copyObjects },
         {
           id: "copy-merged",
           label: m.edit.copyMerged,
-          shortcut: mod("Ctrl+Shift+C"),
-          action: copyObjects,
+          shortcut: hint("mod+Shift+C"),
+          action: () => void copyMergedToClipboard(t.editor.ui.exportDialog.copyFailed),
         },
-        { id: "paste", label: m.edit.paste, shortcut: mod("Ctrl+V"), action: pasteObjects },
+        { id: "paste", label: m.edit.paste, shortcut: hint("mod+V"), action: pasteObjects },
         {
           id: "paste-in-place",
           label: m.edit.pasteInPlace,
-          shortcut: mod("Ctrl+Shift+V"),
+          shortcut: hint("mod+Shift+V"),
           action: pasteInPlace,
           dividerAfter: true,
         },
@@ -179,7 +182,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "free-transform",
           label: m.edit.freeTransform,
-          shortcut: mod("Ctrl+T"),
+          shortcut: hint("mod+T"),
           action: () => setTool("transform"),
           dividerAfter: true,
         },
@@ -211,14 +214,12 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "image-size",
           label: m.image.imageSize,
-          shortcut: mod("Ctrl+Alt+I"),
           action: callbacks.onImageResize,
           dividerAfter: true,
         },
         {
           id: "canvas-size",
           label: m.image.canvasSize,
-          shortcut: mod("Ctrl+Alt+C"),
           action: callbacks.onCanvasResize,
         },
         {
@@ -262,7 +263,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "new-layer",
           label: m.layer.newLayer,
-          shortcut: mod("Ctrl+Shift+N"),
+          shortcut: hint("mod+Shift+N"),
           action: addLayer,
         },
         {
@@ -315,7 +316,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "merge-down",
           label: m.layer.mergeDown,
-          shortcut: mod("Ctrl+E"),
+          shortcut: hint("mod+E"),
           action: () => mergeDown(activeLayerId),
           disabled: activeIndex <= 0,
         },
@@ -329,7 +330,8 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "all",
           label: m.select.all,
-          shortcut: mod("Ctrl+A"),
+          // No hint: mod+a selects every object, while this row makes a
+          // pixel selection over the canvas.
           action: () =>
             setSelection({
               type: "rect",
@@ -349,14 +351,14 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "deselect",
           label: m.select.deselect,
-          shortcut: mod("Ctrl+D"),
+          shortcut: hint("mod+D"),
           action: () => setSelection(null),
           dividerAfter: true,
         },
         {
           id: "inverse",
           label: m.select.inverse,
-          shortcut: mod("Ctrl+Shift+I"),
+          shortcut: hint("mod+Shift+I"),
           action: invertSelection,
         },
         { id: "color-range", label: m.select.colorRange },
@@ -458,19 +460,19 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "zoom-in",
           label: m.view.zoomIn,
-          shortcut: mod("Ctrl+="),
+          shortcut: hint("mod+="),
           action: () => setZoom(zoom * 1.25),
         },
         {
           id: "zoom-out",
           label: m.view.zoomOut,
-          shortcut: mod("Ctrl+-"),
+          shortcut: hint("mod+-"),
           action: () => setZoom(zoom / 1.25),
         },
         {
           id: "fit-on-screen",
           label: m.view.fitOnScreen,
-          shortcut: mod("Ctrl+0"),
+          shortcut: hint("mod+0"),
           action: () => {
             const editorCanvas = document.querySelector("[data-testid='editor-canvas']");
             if (!editorCanvas) return;
@@ -487,7 +489,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "actual-pixels",
           label: m.view.actualPixels,
-          shortcut: mod("Ctrl+1"),
+          shortcut: hint("mod+1"),
           action: () => {
             const editorCanvas = document.querySelector("[data-testid='editor-canvas']");
             if (!editorCanvas) return;

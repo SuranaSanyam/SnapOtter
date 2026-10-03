@@ -30,6 +30,7 @@ export const ptBR: TranslationKeys = {
     clear: "Limpar",
     copy: "Copiar",
     copied: "Copiado!",
+    copyFailed: "Falha ao copiar",
     noResults: "Nenhum resultado encontrado",
     showLess: "Mostrar menos",
     showMore: "Mostrar mais {count}",
@@ -1245,7 +1246,13 @@ export const ptBR: TranslationKeys = {
       name: "Construtor de Pipeline",
       description: "Encadeie várias ferramentas em um fluxo de trabalho",
     },
-    processing: { canceled: "Processamento cancelado" },
+    processing: {
+      canceled: "Processamento cancelado",
+      cancelUnavailable: "Este processamento não pode ser cancelado agora. Ele continua.",
+      cancelNotAllowed:
+        "Não foi possível cancelar: você saiu da conta ou não tem permissão para parar este processamento. Ele continua.",
+      cancelFailed: "Não foi possível cancelar o processamento. Ele continua, tente novamente.",
+    },
     mediaPlayer: {
       unsupported: "Seu navegador não suporta este formato de mídia.",
     },
@@ -4340,7 +4347,7 @@ export const ptBR: TranslationKeys = {
       dropDescription: "Arraste uma imagem aqui para começar",
       openImageButton: "Abrir imagem",
       newDocumentButton: "Novo documento",
-      pasteHint: "Ou cole da área de transferência (Ctrl+V)",
+      pasteHint: "Ou cole da área de transferência ({shortcut})",
     },
     mobile: {
       heading: "Recomendado para desktop",
@@ -4586,8 +4593,8 @@ export const ptBR: TranslationKeys = {
         median: "Mediana",
       },
       history: {
-        undoTitle: "Desfazer (Ctrl+Z)",
-        redoTitle: "Refazer (Ctrl+Shift+Z)",
+        undoTitle: "Desfazer ({shortcut})",
+        redoTitle: "Refazer ({shortcut})",
         empty: "Nenhum histórico ainda",
         unknown: "Desconhecido",
         actions: {
@@ -4643,7 +4650,7 @@ export const ptBR: TranslationKeys = {
         },
       },
       layers: {
-        newLayerTitle: "Nova camada (Ctrl+Shift+N)",
+        newLayerTitle: "Nova camada ({shortcut})",
         blend: "Mesclagem",
         opacity: "Opacidade",
         hideLayer: "Ocultar camada",
@@ -5463,6 +5470,7 @@ export const ptBR: TranslationKeys = {
     fileCount: "{count} arquivos",
     fileCountSingular: "{count} arquivo",
     noFilesFound: "Nenhum arquivo encontrado",
+    loadFailed: "Não foi possível carregar seus arquivos.",
     selectFilePrompt: "Selecione um arquivo para ver os detalhes",
     openFile: "Abrir arquivo",
     selectFile: "Selecionar arquivo",

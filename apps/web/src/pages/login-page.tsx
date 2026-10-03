@@ -5,6 +5,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router";
 import { useTranslation } from "@/contexts/i18n-context";
 import { useAuth } from "@/hooks/use-auth";
+import { useTimeouts } from "@/hooks/use-timeouts";
 import { setToken } from "@/lib/api";
 import { appUrl } from "@/lib/app-url";
 import { format, plural } from "@/lib/format";
@@ -100,14 +101,15 @@ function RotatingPhrase() {
   const phrases = t.auth.rotatingPhrases;
   const [index, setIndex] = useState(0);
   const [visible, setVisible] = useState(true);
+  const later = useTimeouts();
 
   const advance = useCallback(() => {
     setVisible(false);
-    setTimeout(() => {
+    later(() => {
       setIndex((i) => (i + 1) % phrases.length);
       setVisible(true);
     }, 300);
-  }, [phrases.length]);
+  }, [phrases.length, later]);
 
   useEffect(() => {
     const timer = setInterval(advance, 3000);
@@ -237,6 +239,10 @@ export function LoginPage() {
   const [enrollmentCode, setEnrollmentCode] = useState("");
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
   const [enrollmentCodesCopied, setEnrollmentCodesCopied] = useState(false);
+  // Keep this above the redirect effect below. useTimeouts arms itself in its
+  // own effect, effects run in hook order, and that effect schedules the MFA
+  // focus on first commit; a later() before arming is silently dropped.
+  const later = useTimeouts();
 
   useEffect(() => {
     // A successful OIDC/SAML login for an already-enrolled user redirects
@@ -247,7 +253,7 @@ export function LoginPage() {
     if (redirectedMfaToken) {
       setMfaToken(redirectedMfaToken);
       setShowMfaPrompt(true);
-      setTimeout(() => mfaInputRef.current?.focus(), 100);
+      later(() => mfaInputRef.current?.focus(), 100);
       // Drop it from the URL: it's a one-time credential and has no business
       // sitting in browser history or a Referer header for the rest of the
       // challenge. Also stops a later effect re-run (e.g. a locale switch)
@@ -273,7 +279,7 @@ export function LoginPage() {
       setError(errorMessages[authError] || t.auth.oidcGenericError);
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, setSearchParams, t]);
+  }, [searchParams, setSearchParams, t, later]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -326,13 +332,13 @@ export function LoginPage() {
         setEnrollmentUri(data.uri);
         setEnrollmentRecoveryCodes(data.recoveryCodes ?? []);
         setShowMfaEnrollment(true);
-        setTimeout(() => mfaInputRef.current?.focus(), 100);
+        later(() => mfaInputRef.current?.focus(), 100);
         return;
       }
       if (data.requiresMfa) {
         setMfaToken(data.mfaToken);
         setShowMfaPrompt(true);
-        setTimeout(() => mfaInputRef.current?.focus(), 100);
+        later(() => mfaInputRef.current?.focus(), 100);
         return;
       }
       setToken(data.token);
@@ -425,8 +431,12 @@ export function LoginPage() {
     if (enrollmentRecoveryCodes.length === 0) return;
     const ok = await copyToClipboard(enrollmentRecoveryCodes.join("\n"));
     if (ok) {
+      // A retry that works takes down the earlier copy failure, not other errors.
+      setError((e) => (e === t.settings.security.twoFactorCopyFailed ? "" : e));
       setEnrollmentCodesCopied(true);
-      setTimeout(() => setEnrollmentCodesCopied(false), 2000);
+      later(() => setEnrollmentCodesCopied(false), 2000, "enrollmentCodesCopied");
+    } else {
+      setError(t.settings.security.twoFactorCopyFailed);
     }
   };
 
@@ -723,7 +733,7 @@ export function LoginPage() {
         <div className="max-w-lg space-y-4 text-center">
           <h2 className="text-4xl font-extrabold tracking-tight">{t.auth.heroTitle}</h2>
           <p className="text-lg text-primary-foreground">{t.auth.heroSubtitle}</p>
-          <p className="text-xl font-medium h-8">
+          <p className="text-xl font-medium h-8" data-testid="login-rotating-phrase">
             <RotatingPhrase />
           </p>
         </div>

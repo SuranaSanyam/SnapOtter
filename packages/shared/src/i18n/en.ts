@@ -28,6 +28,7 @@ export const en = {
     clear: "Clear",
     copy: "Copy",
     copied: "Copied!",
+    copyFailed: "Copy failed",
     noResults: "No results found",
     showLess: "Show less",
     showMore: "Show {count} more",
@@ -1194,7 +1195,13 @@ export const en = {
         "Safely extract files from a ZIP archive with bomb protection. Single-file archives return the file directly.",
     },
     pipeline: { name: "Pipeline Builder", description: "Chain multiple tools into a workflow" },
-    processing: { canceled: "Processing canceled" },
+    processing: {
+      canceled: "Processing canceled",
+      cancelUnavailable: "This run can't be canceled now. It's still going.",
+      cancelNotAllowed:
+        "Couldn't cancel: you're signed out or not allowed to stop this run. It's still going.",
+      cancelFailed: "Couldn't cancel the run. It's still going, so try again.",
+    },
     mediaPlayer: {
       unsupported: "Your browser does not support this media format.",
     },
@@ -4267,7 +4274,7 @@ export const en = {
       dropDescription: "Drop an image here to get started",
       openImageButton: "Open Image",
       newDocumentButton: "New Document",
-      pasteHint: "Or paste from clipboard (Ctrl+V)",
+      pasteHint: "Or paste from clipboard ({shortcut})",
     },
     mobile: {
       heading: "Desktop Recommended",
@@ -4512,8 +4519,8 @@ export const en = {
         median: "Median",
       },
       history: {
-        undoTitle: "Undo (Ctrl+Z)",
-        redoTitle: "Redo (Ctrl+Shift+Z)",
+        undoTitle: "Undo ({shortcut})",
+        redoTitle: "Redo ({shortcut})",
         empty: "No history yet",
         unknown: "Unknown",
         actions: {
@@ -4569,7 +4576,7 @@ export const en = {
         },
       },
       layers: {
-        newLayerTitle: "New Layer (Ctrl+Shift+N)",
+        newLayerTitle: "New Layer ({shortcut})",
         blend: "Blend",
         opacity: "Opacity",
         hideLayer: "Hide layer",
@@ -5373,6 +5380,7 @@ export const en = {
     fileCount: "{count} files",
     fileCountSingular: "{count} file",
     noFilesFound: "No files found",
+    loadFailed: "Couldn't load your files.",
     selectFilePrompt: "Select a file to view details",
     openFile: "Open File",
     selectFile: "Select File",

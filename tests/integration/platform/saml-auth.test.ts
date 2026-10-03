@@ -11,11 +11,14 @@
  * tests (#978) use to make one call throw.
  */
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { inspect } from "node:util";
+import { DrizzleQueryError, eq, sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "../../../apps/api/src/config.js";
 import { db, schema } from "../../../apps/api/src/db/index.js";
+import { classifyError } from "../../../apps/api/src/lib/error-report.js";
 import { UsernameRaceExhaustedError } from "../../../apps/api/src/lib/external-auth-resolver.js";
+import { buildBeforeSend } from "../../../apps/api/src/lib/sentry-scrub.js";
 import { buildTestApp, type TestApp } from "../test-server.js";
 import { parseExternalUrl, SSO_DEPLOYMENTS } from "./sso-deployments.js";
 
@@ -57,6 +60,14 @@ vi.mock("../../../apps/api/src/lib/external-auth-resolver.js", async (importOrig
       return realResolve(...args);
     },
   };
+});
+
+// reportError is mocked so the callback tests can read exactly what it hands
+// Sentry (#1866, #1868); every other error-report export stays real.
+const reportErrorSpy = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("../../../apps/api/src/lib/error-report.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, reportError: reportErrorSpy };
 });
 
 vi.mock("@node-saml/node-saml", () => ({
@@ -173,11 +184,20 @@ describe("SAML login redirect", () => {
 });
 
 describe("SAML callback", () => {
+  // Cleared before (not after) each test so a report from an earlier describe
+  // can't leak into the first assertion here.
+  beforeEach(() => {
+    reportErrorSpy.mockClear();
+  });
+
   it("rejects an assertion that fails validation", async () => {
     samlMock.validatePostResponseAsync.mockRejectedValue(new Error("invalid signature"));
     const res = await postCallback();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe("/login?error=saml_auth_failed");
+    // Anyone can POST a junk assertion here, so a rejected one must never
+    // reach Sentry: unauthenticated traffic would flood it.
+    expect(reportErrorSpy).not.toHaveBeenCalled();
   });
 
   it("rejects an assertion with no nameID", async () => {
@@ -185,6 +205,7 @@ describe("SAML callback", () => {
     const res = await postCallback();
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe("/login?error=saml_auth_failed");
+    expect(reportErrorSpy).not.toHaveBeenCalled();
   });
 
   it("provisions a user, creates a session, and sets the cookie on success", async () => {
@@ -210,6 +231,8 @@ describe("SAML callback", () => {
       .from(schema.sessions)
       .where(eq(schema.sessions.userId, user?.id as string));
     expect(sessions.length).toBeGreaterThan(0);
+    // A clean login is not a fault: nothing goes to Sentry.
+    expect(reportErrorSpy).not.toHaveBeenCalled();
   });
 
   it("derives the username from the configured username attribute", async () => {
@@ -241,6 +264,8 @@ describe("SAML callback", () => {
       const res = await postCallback();
       expect(res.statusCode).toBe(302);
       expect(res.headers.location).toBe("/login?error=saml_user_not_authorized");
+      // A denial is a login outcome, not a fault, so it isn't reported.
+      expect(reportErrorSpy).not.toHaveBeenCalled();
     } finally {
       (env as Record<string, unknown>).SAML_AUTO_CREATE_USERS = true;
     }
@@ -300,6 +325,7 @@ describe("SAML callback", () => {
           sql`${schema.auditLog.action} = 'SAML_LOGIN_FAILED' AND ${schema.auditLog.details}->>'reason' = 'user_limit_reached' AND ${schema.auditLog.details}->>'externalId' = ${email}`,
         );
       expect(auditRows).toHaveLength(1);
+      expect(reportErrorSpy).not.toHaveBeenCalled();
     } finally {
       (env as Record<string, unknown>).MAX_USERS = origMaxUsers;
     }
@@ -308,7 +334,8 @@ describe("SAML callback", () => {
   it("redirects to saml_auth_failed instead of a raw 500 when auto-create exhausts its username-race retries (#978)", async () => {
     const email = `raced-${randomUUID().slice(0, 8)}@example.com`;
     samlMock.validatePostResponseAsync.mockResolvedValue({ profile: { nameID: email, email } });
-    resolverFailure.next = new UsernameRaceExhaustedError("saml", "raced", 3);
+    const raceErr = new UsernameRaceExhaustedError();
+    resolverFailure.next = raceErr;
 
     const res = await postCallback();
 
@@ -325,7 +352,31 @@ describe("SAML callback", () => {
         sql`${schema.auditLog.action} = 'SAML_LOGIN_FAILED' AND ${schema.auditLog.details}->>'reason' = 'auto_create_race_exhausted' AND ${schema.auditLog.details}->>'externalId' = ${email}`,
       );
     expect(auditRows).toHaveLength(1);
-    expect(auditRows[0].details).toMatchObject({ attemptedUsername: email.split("@")[0] });
+    const attemptedUsername = email.split("@")[0];
+    expect(auditRows[0].details).toMatchObject({ attemptedUsername });
+
+    // Reported once, the error passed through untouched, with route-level
+    // context only: the exact match rules out a username in the context. The
+    // rest guards the callback against wrapping or annotating the error with
+    // the username on the way out (#1866); the error's own contents are pinned
+    // at the real throw site in tests/unit/api/external-auth-resolver-mutation.test.ts.
+    expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+    expect(reportErrorSpy).toHaveBeenCalledWith(raceErr, {
+      source: "http",
+      route: "/api/auth/saml/callback",
+      method: "POST",
+      subsystem: "external-auth",
+    });
+    const reported = reportErrorSpy.mock.calls[0][0] as Error;
+    expect(inspect(reported, { showHidden: true, depth: Number.POSITIVE_INFINITY })).not.toContain(
+      attemptedUsername,
+    );
+    for (const diagnostic of [false, true]) {
+      const event = { exception: { values: [{ type: reported.name, value: reported.message }] } };
+      const sent = buildBeforeSend(() => true, diagnostic)(event, { originalException: reported });
+      expect(sent).not.toBeNull();
+      expect(JSON.stringify(sent)).not.toContain(attemptedUsername);
+    }
   });
 
   it("still surfaces any other resolver throw as a 500 with no misclassified audit row", async () => {
@@ -349,23 +400,44 @@ describe("SAML callback", () => {
         sql`${schema.auditLog.action} = 'SAML_LOGIN_FAILED' AND ${schema.auditLog.details}->>'externalId' = ${email}`,
       );
     expect(auditRows).toHaveLength(0);
+    // The callback's own catch must not report it as username contention; the
+    // 500 is the global error handler's to report. buildTestApp() doesn't
+    // install that handler yet (#1243), so this only rules out the callback's
+    // report and holds whether or not the handler is there.
+    expect(reportErrorSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ subsystem: "external-auth" }),
+    );
   });
 
-  it("fails the login closed when the MFA enrollment-status read throws", async () => {
-    // The users read that decides whether MFA is checked is intentionally
-    // unguarded in saml.ts: a DB error there must fail the login, never
-    // silently skip MFA for an enrolled user. Spy only the totpEnabled select
+  it("fails the login closed and reports the fault once when the MFA enrollment-status read throws (#1867)", async () => {
+    // The users read that decides whether MFA is checked sits in its own catch
+    // in saml.ts: a DB error there must fail the login, never silently skip
+    // MFA for an enrolled user. Spy only the single-column totpEnabled select
     // (the same shape saml.ts issues) so provisioning/session selects still hit
     // the real DB. Mirrors the OIDC-callback fail-closed test.
     const email = `dberr-${randomUUID().slice(0, 8)}@example.com`;
     samlMock.validatePostResponseAsync.mockResolvedValue({ profile: { nameID: email, email } });
     mfaOutcomeMock.mockReturnValue("proceed");
 
+    // Shaped like the real failure: drizzle wraps the driver's error (a lost
+    // Postgres connection, SQLSTATE 57P01) in a DrizzleQueryError.
+    const pgFault = Object.assign(
+      new Error("terminating connection due to administrator command"),
+      { code: "57P01" },
+    );
+    const enrollmentFault = new DrizzleQueryError(
+      'select "totp_enabled" from "users" where "users"."id" = $1',
+      ["00000000-0000-0000-0000-000000000000"],
+      pgFault,
+    );
+    let enrollmentReads = 0;
     const originalSelect = db.select.bind(db);
     const selectSpy = vi.spyOn(db, "select").mockImplementation((...args: unknown[]) => {
       const selection = args[0] as Record<string, unknown> | undefined;
-      if (selection && "totpEnabled" in selection) {
-        throw new Error("simulated DB failure");
+      if (selection && Object.keys(selection).join() === "totpEnabled") {
+        enrollmentReads++;
+        throw enrollmentFault;
       }
       // biome-ignore lint/suspicious/noExplicitAny: passthrough to the real overloaded implementation
       return (originalSelect as any)(...args);
@@ -376,6 +448,7 @@ describe("SAML callback", () => {
 
       // Must NOT proceed to a session and must NOT issue an MFA challenge:
       // a broken enrollment-status read means the login fails, full stop.
+      expect(enrollmentReads).toBe(1);
       expect(res.statusCode).toBe(302);
       expect(res.headers.location).toBe("/login?error=saml_auth_failed");
       const setCookie = res.headers["set-cookie"];
@@ -389,6 +462,29 @@ describe("SAML callback", () => {
         .from(schema.sessions)
         .where(eq(schema.sessions.userId, user?.id as string));
       expect(sessions.length).toBe(0);
+      const auditRows = await db
+        .select()
+        .from(schema.auditLog)
+        .where(
+          sql`${schema.auditLog.action} = 'SAML_LOGIN_FAILED' AND ${schema.auditLog.details}->>'reason' = 'mfa_check_error' AND ${schema.auditLog.details}->>'userId' = ${user?.id as string}`,
+        );
+      expect(auditRows).toHaveLength(1);
+
+      // The catch keeps the fault from the global error handler, so the
+      // callback reports it itself, exactly once, tagged with its own
+      // subsystem so triage can tell it from the MFA-policy fault. The exact
+      // context match rules out a user id or email riding along in it.
+      expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+      expect(reportErrorSpy).toHaveBeenCalledWith(enrollmentFault, {
+        source: "http",
+        route: "/api/auth/saml/callback",
+        method: "POST",
+        statusCode: 503,
+        subsystem: "mfa-enrollment",
+      });
+      // The real reportError drops "expected" errors; a lost database is the
+      // operator's environment, so it goes out as a throttled warning.
+      expect(classifyError(enrollmentFault, "http")).toBe("operational");
     } finally {
       selectSpy.mockRestore();
     }
@@ -401,7 +497,19 @@ describe("SAML callback", () => {
     // so an unenrolled user is denied with a distinct retryable error param.
     const email = `mfaerr-${randomUUID().slice(0, 8)}@example.com`;
     samlMock.validatePostResponseAsync.mockResolvedValue({ profile: { nameID: email, email } });
-    getMfaPolicyMock.mockRejectedValueOnce(new Error("mfa policy store unavailable"));
+    // Shaped like the real failure: getMfaPolicy's settings read is a drizzle
+    // select, so a lost Postgres connection (SQLSTATE 57P01) arrives wrapped
+    // in a DrizzleQueryError.
+    const pgFault = Object.assign(
+      new Error("terminating connection due to administrator command"),
+      { code: "57P01" },
+    );
+    const policyFault = new DrizzleQueryError(
+      'select "value" from "settings" where "settings"."key" = $1 limit $2',
+      ["mfaPolicy", 1],
+      pgFault,
+    );
+    getMfaPolicyMock.mockRejectedValueOnce(policyFault);
     // Mirror what the real resolver returns for ("unavailable", role, false);
     // the pure mapping itself is covered exhaustively in tests/unit/api/mfa.test.ts.
     mfaOutcomeMock.mockReturnValue("policy_unavailable");
@@ -427,7 +535,24 @@ describe("SAML callback", () => {
         .from(schema.sessions)
         .where(eq(schema.sessions.userId, user?.id as string));
       expect(sessions.length).toBe(0);
+
+      // The catch keeps the fault from the global error handler, so the
+      // callback reports it itself, exactly once: a settings fault denying
+      // every SSO login must show up in triage, not only in the log. The exact
+      // context match rules out a user id or email riding along in it.
+      expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+      expect(reportErrorSpy).toHaveBeenCalledWith(policyFault, {
+        source: "http",
+        route: "/api/auth/saml/callback",
+        method: "POST",
+        statusCode: 503,
+        subsystem: "mfa-policy",
+      });
+      // A lost database is the operator's environment, so it reaches Sentry
+      // as a throttled warning rather than being dropped as expected.
+      expect(classifyError(policyFault, "http")).toBe("operational");
     } finally {
+      getMfaPolicyMock.mockReset();
       getMfaPolicyMock.mockResolvedValue({});
       mfaOutcomeMock.mockReturnValue("proceed");
     }
@@ -445,7 +570,11 @@ describe("SAML callback", () => {
       .set({ totpEnabled: true })
       .where(eq(schema.users.externalId, email));
 
-    getMfaPolicyMock.mockRejectedValueOnce(new Error("mfa policy store unavailable"));
+    // The provisioning login above is clean, so anything reported from here
+    // on comes from the faulted login.
+    expect(reportErrorSpy).not.toHaveBeenCalled();
+    const policyFault = new Error("mfa policy store unavailable");
+    getMfaPolicyMock.mockRejectedValueOnce(policyFault);
     // Mirror what the real resolver returns for ("unavailable", role, true).
     mfaOutcomeMock.mockReturnValue("challenge");
     try {
@@ -459,7 +588,18 @@ describe("SAML callback", () => {
       // regression that hardcodes totpEnabled=false on the failure path, or
       // denies before consulting the resolver, trips this.
       expect(mfaOutcomeMock).toHaveBeenLastCalledWith("unavailable", expect.any(String), true);
+      // The login still goes through to a challenge, but the policy fault is
+      // reported all the same: the read failed whether or not it denied.
+      expect(reportErrorSpy).toHaveBeenCalledTimes(1);
+      expect(reportErrorSpy).toHaveBeenCalledWith(policyFault, {
+        source: "http",
+        route: "/api/auth/saml/callback",
+        method: "POST",
+        statusCode: 503,
+        subsystem: "mfa-policy",
+      });
     } finally {
+      getMfaPolicyMock.mockReset();
       getMfaPolicyMock.mockResolvedValue({});
       mfaOutcomeMock.mockReturnValue("proceed");
     }
