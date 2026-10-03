@@ -22,7 +22,6 @@ permissions:
 jobs:
   update:
     name: Update sponsors block
-    if: github.repository == 'snapotter-hq/SnapOtter'
     runs-on: ubuntu-latest
     env:
       BRANCH: chore/readme-sponsors
