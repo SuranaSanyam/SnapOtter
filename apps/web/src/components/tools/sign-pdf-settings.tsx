@@ -322,10 +322,7 @@ export function SignPdfSettings({ signProps }: { signProps?: SignProps }) {
       } catch (err) {
         console.error("Failing the Sign PDF run's entry failed", err);
         // The console alone never reaches Sentry (#1882).
-        void captureHandledError(
-          new SafeError("Failing a Sign PDF run's entry failed", { kind: "bug", cause: err }),
-          { error_class: "bug", tool_id: "sign-pdf" },
-        );
+        reportRunEndFailure("Failing a Sign PDF run's entry failed", err, "sign-pdf");
       }
       if (teardown) throw teardown.cause;
     };
