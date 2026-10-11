@@ -330,8 +330,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
         {
           id: "all",
           label: m.select.all,
-          // No hint: mod+a selects every object, while this row makes a
-          // pixel selection over the canvas.
+          shortcut: hint("mod+A"),
           action: () =>
             setSelection({
               type: "rect",
