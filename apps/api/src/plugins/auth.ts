@@ -105,13 +105,14 @@ async function upgradeLegacyPasswordHash(
   userId: string,
   verifiedHash: string,
   password: string,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const upgraded = await hashPassword(normalizePassword(password));
     await db
       .update(schema.users)
       .set({ passwordHash: upgraded })
       .where(and(eq(schema.users.id, userId), eq(schema.users.passwordHash, verifiedHash)));
+    return upgraded;
   } catch (err) {
     request.log.warn({ err, userId }, "Could not upgrade a password hash to its normalized form");
     // request.log has no Sentry bridge, and a fault that persists leaves the other
@@ -721,7 +722,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       // Before the MFA branch, which never sees the password again.
       if (legacy) {
-        await upgradeLegacyPasswordHash(request, user.id, user.passwordHash, body.password);
+        const upgraded = await upgradeLegacyPasswordHash(
+          request,
+          user.id,
+          user.passwordHash,
+          body.password,
+        );
+        if (upgraded) {
+          user.passwordHash = upgraded;
+        }
       }
 
       // Two failures used to share one silent catch here and they want
@@ -765,7 +774,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // ── MFA challenge ──────────────────────────────────────────
       if (user.totpEnabled) {
         const mfaToken = randomUUID();
-        await redis.setex(`mfa:${mfaToken}`, 300, user.id);
+        let payload = user.id;
+        if (user.passwordHash) {
+          const hashFingerprint = createHash("sha256")
+            .update(user.passwordHash)
+            .digest("hex")
+            .substring(0, 16);
+          payload = `${user.id}:${hashFingerprint}`;
+        }
+        await redis.setex(`mfa:${mfaToken}`, 300, payload);
 
         await audit("MFA_CHALLENGE_ISSUED", { userId: user.id, username: user.username });
 
@@ -824,11 +841,41 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const token = createSessionToken();
       const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
-      await db.insert(schema.sessions).values({
-        id: token,
-        userId: user.id,
-        expiresAt,
+      // Wrap the session insert in a transaction that takes FOR SHARE on the user row
+      // and refuses if the hash differs from the one verified. This conflicts with
+      // the FOR NO KEY UPDATE in the password change route, closing the race condition.
+      const inserted = await db.transaction(async (tx) => {
+        const [lockedUser] = await tx
+          .select({ passwordHash: schema.users.passwordHash })
+          .from(schema.users)
+          .where(eq(schema.users.id, user.id))
+          .for("share");
+
+        if (lockedUser?.passwordHash !== user.passwordHash) {
+          return false;
+        }
+
+        await tx.insert(schema.sessions).values({
+          id: token,
+          userId: user.id,
+          expiresAt,
+        });
+
+        return true;
       });
+
+      if (!inserted) {
+        authAttempts.inc({ method: "password", result: "failure" });
+        void trackEvent(ANALYTICS_EVENTS.AUTH_LOGIN_FAILED, { method: "password" });
+        await audit("LOGIN_FAILED", {
+          username: sanitizeAuditInput(body.username),
+          reason: "password_changed_concurrently",
+        });
+
+        // Use a generic delay so this is not a timing oracle
+        await recordThrottleFailure();
+        return reply.status(401).send({ error: "Invalid credentials" });
+      }
 
       // ── Concurrent session limit (FIFO eviction) ──────────────
       const maxSessions = await getSettingNumber("maxSessionsPerUser");
