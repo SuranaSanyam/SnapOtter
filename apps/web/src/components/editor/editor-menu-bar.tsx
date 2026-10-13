@@ -84,6 +84,7 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
   const pasteInPlace = useEditorStore((s) => s.pasteInPlace);
   const removeObjects = useEditorStore((s) => s.removeObjects);
   const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
+  const setSelectedObjects = useEditorStore((s) => s.setSelectedObjects);
   const bringToFront = useEditorStore((s) => s.bringToFront);
   const bringForward = useEditorStore((s) => s.bringForward);
   const sendBackward = useEditorStore((s) => s.sendBackward);
@@ -331,7 +332,8 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
           id: "all",
           label: m.select.all,
           shortcut: hint("mod+A"),
-          action: () =>
+          action: () => {
+            setSelectedObjects([]);
             setSelection({
               type: "rect",
               points: [
@@ -345,7 +347,8 @@ function useMenuDefinitions(callbacks: MenuBarCallbacks): MenuDef[] {
                 canvasSize.height,
               ],
               bounds: { x: 0, y: 0, width: canvasSize.width, height: canvasSize.height },
-            }),
+            });
+          },
         },
         {
           id: "deselect",

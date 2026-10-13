@@ -408,6 +408,7 @@ export function useEditorShortcuts(callbacks?: {
       e.preventDefault();
       const state = useEditorStore.getState();
       const { width, height } = state.canvasSize;
+      state.setSelectedObjects([]);
       state.setSelection({
         type: "rect",
         points: [0, 0, width, 0, width, height, 0, height],
@@ -425,6 +426,7 @@ export function useEditorShortcuts(callbacks?: {
       e.preventDefault();
       const state = useEditorStore.getState();
       const allIds = state.objects.map((o) => o.id);
+      state.setSelection(null);
       state.setSelectedObjects(allIds);
     },
     { preventDefault: true },

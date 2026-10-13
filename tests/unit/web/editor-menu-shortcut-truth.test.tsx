@@ -183,13 +183,17 @@ describe("editor menu bar hints name keys that run the command (#1943)", () => {
     onWindows();
     useEditorStore.setState({
       canvasSize: { width: 800, height: 600 },
-      selection: null,
+      selection: {
+        type: "rect",
+        points: [10, 10, 50, 10, 50, 50, 10, 50],
+        bounds: { x: 10, y: 10, width: 40, height: 40 },
+      },
       objects: [{ id: "obj-1" } as any],
-      selectedObjectIds: [],
+      selectedObjectIds: ["obj-1"],
     });
     renderHook(() => useEditorShortcuts());
 
-    // Ctrl+A -> pixel selection over the whole canvas
+    // Ctrl+A -> pixel selection over the whole canvas, clears object selection
     fireEvent.keyDown(document, { key: "a", code: "KeyA", ctrlKey: true });
     expect(useEditorStore.getState().selection).toEqual({
       type: "rect",
@@ -198,9 +202,19 @@ describe("editor menu bar hints name keys that run the command (#1943)", () => {
     });
     expect(useEditorStore.getState().selectedObjectIds).toEqual([]);
 
-    // Alt+Ctrl+A -> selects all objects
+    // Restore pixel selection
+    useEditorStore.setState({
+      selection: {
+        type: "rect",
+        points: [10, 10, 50, 10, 50, 50, 10, 50],
+        bounds: { x: 10, y: 10, width: 40, height: 40 },
+      },
+    });
+
+    // Alt+Ctrl+A -> selects all objects, clears pixel selection
     fireEvent.keyDown(document, { key: "a", code: "KeyA", ctrlKey: true, altKey: true });
     expect(useEditorStore.getState().selectedObjectIds).toEqual(["obj-1"]);
+    expect(useEditorStore.getState().selection).toBeNull();
   });
 });
 
