@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toStorableJson } from "../../../apps/api/src/lib/storable-json.js";
+import { isStorableJson, toStorableJson } from "../../../apps/api/src/lib/storable-json.js";
 
 const NUL = String.fromCharCode(0);
 const HIGH = String.fromCharCode(0xd800);
@@ -93,5 +93,50 @@ describe("toStorableJson", () => {
     // JSON.stringify writes a lone surrogate or NUL as an escape; none may remain.
     expect(out.toLowerCase()).not.toContain("\\ud8");
     expect(out).not.toContain("\\u0000");
+  });
+});
+
+// Where the stored value is read back as data (preferences, saved pipelines,
+// API-key names), a lossy copy would be wrong, so these refuse instead (#2184).
+describe("isStorableJson", () => {
+  it("accepts ordinary text, numbers, booleans, null, arrays and nesting", () => {
+    expect(isStorableJson({ a: "ok", n: 1.5, t: true, z: null, list: ["x", { deep: "y" }] })).toBe(
+      true,
+    );
+    expect(isStorableJson("plain")).toBe(true);
+    expect(isStorableJson(null)).toBe(true);
+  });
+
+  it("accepts a valid surrogate pair and non-Latin text", () => {
+    expect(isStorableJson({ a: `hi ${EMOJI}`, [EMOJI]: 1, ja: "日本語" })).toBe(true);
+  });
+
+  it("rejects a NUL in a string, at any depth", () => {
+    expect(isStorableJson(`x${NUL}y`)).toBe(false);
+    expect(isStorableJson({ a: `x${NUL}y` })).toBe(false);
+    expect(isStorableJson({ a: [{ b: `x${NUL}` }] })).toBe(false);
+  });
+
+  it("rejects a NUL in an object key", () => {
+    expect(isStorableJson({ [`a${NUL}b`]: 1 })).toBe(false);
+    expect(isStorableJson({ outer: { [`a${NUL}b`]: 1 } })).toBe(false);
+  });
+
+  it("rejects a lone surrogate in a string or a key", () => {
+    expect(isStorableJson({ a: `x${HIGH}y` })).toBe(false);
+    expect(isStorableJson({ a: `x${LOW}y` })).toBe(false);
+    expect(isStorableJson({ [`k${HIGH}`]: 1 })).toBe(false);
+    expect(isStorableJson([`x${HIGH}`])).toBe(false);
+  });
+
+  it("walks 20000 levels of nesting without overflowing the stack", () => {
+    const nest = (leaf: string) =>
+      JSON.parse(`${'{"a":['.repeat(10_000)}${JSON.stringify(leaf)}${"]}".repeat(10_000)}`);
+    expect(isStorableJson(nest("fine"))).toBe(true);
+    expect(isStorableJson(nest(`x${NUL}`))).toBe(false);
+  });
+
+  it("sees a NUL under a __proto__ key that JSON.parse kept as a normal key", () => {
+    expect(isStorableJson(JSON.parse(`{"a":{"__proto__":"x\\u0000"}}`))).toBe(false);
   });
 });

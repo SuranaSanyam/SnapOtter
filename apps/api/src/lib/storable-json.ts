@@ -1,5 +1,5 @@
 // Node 22 has it; the project's ES2022 lib typings don't know it yet.
-type WellFormable = string & { toWellFormed(): string };
+type WellFormable = string & { toWellFormed(): string; isWellFormed(): boolean };
 
 const toStorableString = (s: string): string =>
   (s.replace(/\0/g, "") as WellFormable).toWellFormed();
@@ -36,3 +36,34 @@ export function toStorableJson<T>(value: T): T {
   }
   return value;
 }
+
+/**
+ * True when every key and string in a parsed JSON value can be stored as
+ * Postgres jsonb (#2184): no U+0000 and no unpaired surrogate, at any depth.
+ * Routes that keep what the client sent and read it back as data use this to
+ * answer 400 instead of silently rewriting it the way toStorableJson does.
+ *
+ * Walks with an explicit stack: Postgres stores jsonb nested far deeper than
+ * the call stack recurses, and a RangeError here would turn a body that used to
+ * save into a 500.
+ */
+export function isStorableJson(value: unknown): boolean {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const v = pending.pop();
+    if (typeof v === "string") {
+      if (!isStorableString(v)) return false;
+    } else if (Array.isArray(v)) {
+      for (const item of v) pending.push(item);
+    } else if (v && typeof v === "object") {
+      for (const [k, item] of Object.entries(v)) {
+        if (!isStorableString(k)) return false;
+        pending.push(item);
+      }
+    }
+  }
+  return true;
+}
+
+const isStorableString = (s: string): boolean =>
+  !s.includes("\0") && (s as WellFormable).isWellFormed();
