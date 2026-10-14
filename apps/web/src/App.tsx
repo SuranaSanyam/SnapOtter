@@ -231,11 +231,15 @@ export function App() {
   }, [fetchAnalyticsConfig]);
 
   useEffect(() => {
-    if (localStorage.getItem("snapotter-welcome") === "1") {
-      localStorage.removeItem("snapotter-welcome");
-      toast("Hello from the otter side! 🦦", {
-        duration: 5000,
-      });
+    try {
+      if (localStorage.getItem("snapotter-welcome") === "1") {
+        localStorage.removeItem("snapotter-welcome");
+        toast("Hello from the otter side! 🦦", {
+          duration: 5000,
+        });
+      }
+    } catch (error) {
+      console.warn("Could not access browser storage to handle welcome flag.", error);
     }
   }, []);
 

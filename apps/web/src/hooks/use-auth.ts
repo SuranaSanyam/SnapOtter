@@ -170,7 +170,11 @@ export function useAuth() {
           // /health, a 5xx from a database fault) says nothing about the
           // session, so it must not clear the token and sign the user out
           // (#2355); it falls through to the retry below instead.
-          clearToken();
+          try {
+            clearToken();
+          } catch (error) {
+            console.error("Unexpected error during auth state teardown.", error);
+          }
           if (!cancelled)
             setState({
               loading: false,

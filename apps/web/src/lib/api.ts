@@ -77,7 +77,12 @@ export function failedAnswerMessage(
 // ── Auth Headers ───────────────────────────────────────────────
 
 function getBrowserStorage(): Storage | null {
-  return typeof window !== "undefined" ? window.localStorage : null;
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch (error) {
+    console.warn("Browser storage access denied. Authentication state will not persist.", error);
+    return null;
+  }
 }
 
 function getToken(): string {
