@@ -13,6 +13,7 @@ import { FEATURE_BUNDLES, isSafeMessageError, MODALITY_POOL, TOOLS } from "@snap
 import type { FlowJob } from "bullmq";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import sharp from "sharp";
 import { z } from "zod";
 import { env } from "../config.js";
 import { db, schema } from "../db/index.js";
@@ -43,6 +44,7 @@ import {
 import { getFirstMissingBundleForTool } from "../lib/feature-status.js";
 import { validateImageBuffer } from "../lib/file-validation.js";
 import {
+  DecoderOutOfMemoryError,
   decodeToSharpCompat,
   isDecoderUnavailable,
   needsCliDecode,
@@ -72,6 +74,7 @@ import { settledFailureResponse } from "../lib/settled-failure.js";
 import { isStorableJson, toStorableJson } from "../lib/storable-json.js";
 import { isSvgBuffer, sanitizeSvg } from "../lib/svg-sanitize.js";
 import { InputValidationError } from "../modality/contract.js";
+import { engineUnavailable } from "../modality/image-input.js";
 import { inputHandlerFor } from "../modality/input-handler.js";
 import { hasEffectivePermission, hasEffectiveToolAccess } from "../permissions.js";
 import { type AuthUser, requireAuth } from "../plugins/auth.js";
@@ -1474,7 +1477,22 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
                     processBuffer = await decodeHeic(processBuffer);
                     const ext = processFilename.match(/\.[^.]+$/)?.[0];
                     if (ext) processFilename = `${processFilename.slice(0, -ext.length)}.png`;
-                  } catch {
+                  } catch (err) {
+                    if (isDecoderUnavailable(err)) {
+                      const unavailable = engineUnavailable(err);
+                      reportEngineUnavailable(
+                        unavailable,
+                        pipeline.steps[0]?.toolId ?? "pipeline",
+                        request.log,
+                      );
+                      preFailures.push({
+                        originalIndex: fi,
+                        filename: file.filename,
+                        error: unavailable.message,
+                        ...preFailureFaultFields(unavailable),
+                      });
+                      continue;
+                    }
                     preFailures.push({
                       originalIndex: fi,
                       filename: file.filename,
@@ -1494,8 +1512,42 @@ export async function registerPipelineRoutes(app: FastifyInstance): Promise<void
                     );
                     const ext = processFilename.match(/\.[^.]+$/)?.[0];
                     if (ext) processFilename = `${processFilename.slice(0, -ext.length)}.png`;
-                  } catch {
-                    // Fall through -- tool might handle it
+                  } catch (decodeErr) {
+                    if (decodeErr instanceof DecoderOutOfMemoryError) {
+                      const unavailable = engineUnavailable(decodeErr);
+                      reportEngineUnavailable(
+                        unavailable,
+                        pipeline.steps[0]?.toolId ?? "pipeline",
+                        request.log,
+                      );
+                      preFailures.push({
+                        originalIndex: fi,
+                        filename: file.filename,
+                        error: unavailable.message,
+                        ...preFailureFaultFields(unavailable),
+                      });
+                      continue;
+                    }
+                    try {
+                      await sharp(processBuffer).metadata();
+                    } catch {
+                      if (isDecoderUnavailable(decodeErr)) {
+                        const unavailable = engineUnavailable(decodeErr);
+                        reportEngineUnavailable(
+                          unavailable,
+                          pipeline.steps[0]?.toolId ?? "pipeline",
+                          request.log,
+                        );
+                        preFailures.push({
+                          originalIndex: fi,
+                          filename: file.filename,
+                          error: unavailable.message,
+                          ...preFailureFaultFields(unavailable),
+                        });
+                        continue;
+                      }
+                      // Fall through: tool might handle it
+                    }
                   }
                 }
 
