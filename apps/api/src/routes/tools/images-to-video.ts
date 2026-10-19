@@ -4,6 +4,7 @@ import { videoCodecArgs } from "@snapotter/media-engine";
 import type { FastifyInstance } from "fastify";
 import sharp from "sharp";
 import { z } from "zod";
+import { asInputErrorIfUndecodable, withImageEncodeContextV2 } from "../../lib/image-error.js";
 import { mp4TimescaleArgs, runFfmpegWithProgress } from "../../lib/media-tool.js";
 import { InputValidationError } from "../../modality/contract.js";
 import { createToolRoute, type ToolProcessCtxV2 } from "../tool-factory.js";
@@ -38,7 +39,7 @@ export function registerImagesToVideo(app: FastifyInstance) {
       const settings = settingsSchema.parse(ctx.settings);
       const { w: W, h: H } = DIMS[settings.resolution];
 
-      const paths = await stageImageFrames(ctx);
+      const paths = await stageImageFrames(ctx, settings.resolution);
 
       const parts: string[] = [];
       const refs: string[] = [];
@@ -77,15 +78,31 @@ export function registerImagesToVideo(app: FastifyInstance) {
   });
 }
 
-async function stageImageFrames(ctx: ToolProcessCtxV2): Promise<string[]> {
-  const dir = join(ctx.scratchDir, "media", "frames");
-  await mkdir(dir, { recursive: true });
+async function stageImageFrames(ctx: ToolProcessCtxV2, resolution: string): Promise<string[]> {
+  return withImageEncodeContextV2<string>(
+    "Slideshow video creation failed",
+    (res) => res ?? "720p",
+    async (innerCtx) => {
+      const dir = join(innerCtx.scratchDir, "media", "frames");
+      await mkdir(dir, { recursive: true });
 
-  return Promise.all(
-    ctx.inputs.map(async (input, index) => {
-      const framePath = join(dir, `frame-${String(index).padStart(4, "0")}.png`);
-      await sharp(input.buffer, { animated: false }).png().toFile(framePath);
-      return framePath;
-    }),
-  );
+      const paths = await Promise.all(
+        innerCtx.inputs.map(async (input, index) => {
+          const framePath = join(dir, `frame-${String(index).padStart(4, "0")}.png`);
+          try {
+            await sharp(input.buffer, { animated: false }).png().toFile(framePath);
+          } catch (err) {
+            throw await asInputErrorIfUndecodable(input.buffer, err);
+          }
+          return framePath;
+        }),
+      );
+      return {
+        scratchPath: paths[0],
+        filename: "frames",
+        contentType: "image/png",
+        resultPayload: { paths },
+      };
+    },
+  )({ ...ctx, settings: resolution }).then((res) => res.resultPayload?.paths as string[]);
 }

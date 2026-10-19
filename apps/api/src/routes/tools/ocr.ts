@@ -19,6 +19,7 @@ import {
   type ToolJobData,
 } from "../../jobs/types.js";
 import { formatZodErrors, stripInternalPaths } from "../../lib/errors.js";
+import { asInputErrorIfUndecodable } from "../../lib/image-error.js";
 import { trackClientDisconnect } from "../../lib/ingress-disconnect.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { deleteObject } from "../../lib/object-storage.js";
@@ -83,17 +84,22 @@ async function processOcrJob(
   ctx.signal.throwIfAborted();
   ctx.report(10, "Preparing OCR");
 
-  const result = await extractText(
-    prepared.buffer,
-    ctx.scratchDir,
-    {
-      quality,
-      language: settings.language,
-      enhance: settings.enhance ?? quality === "best",
-      signal: ctx.signal,
-    },
-    (percent, stage) => ctx.report(10 + Math.max(0, Math.min(100, percent)) * 0.9, stage),
-  );
+  let result: Awaited<ReturnType<typeof extractText>>;
+  try {
+    result = await extractText(
+      prepared.buffer,
+      ctx.scratchDir,
+      {
+        quality,
+        language: settings.language,
+        enhance: settings.enhance ?? quality === "best",
+        signal: ctx.signal,
+      },
+      (percent, stage) => ctx.report(10 + Math.max(0, Math.min(100, percent)) * 0.9, stage),
+    );
+  } catch (err) {
+    throw await asInputErrorIfUndecodable(prepared.buffer, err);
+  }
   const base = prepared.filename.replace(/\.[^.]+$/, "");
   return {
     buffer: Buffer.from(result.text, "utf-8"),

@@ -24,6 +24,7 @@ import {
   needsCliDecode,
 } from "../../lib/format-decoders.js";
 import { decodeHeic } from "../../lib/heic-converter.js";
+import { asInputErrorIfUndecodable, withImageEncodeContext } from "../../lib/image-error.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { discardUnenqueuedUploads, hasPersistedJobRow } from "../../lib/upload-cleanup.js";
 import { receiveUpload } from "../../lib/upload-stream.js";
@@ -73,58 +74,69 @@ registerAiJobHandler("background-replace", async (input, data, ctx) => {
 
   ctx.report(5, "Removing background");
 
-  const subjectPng = await removeBackground(
-    input,
-    ctx.scratchDir,
-    { signal: ctx.signal, toolId: "background-replace" },
-    (percent, stage) => {
-      // Scale rembg progress into 5..80 range
-      const scaled = 5 + Math.round(percent * 0.75);
-      ctx.report(Math.min(scaled, 80), stage);
-    },
-  );
-
-  // Feather alpha edges before compositing
-  let subject = subjectPng;
-  if (settings.feather > 0) {
-    ctx.report(82, "Feathering edges");
-    subject = await featherEdges(subjectPng, settings.feather);
-  }
-
-  ctx.report(85, "Compositing background");
-
-  let composited: Buffer;
-  if (settings.backgroundType === "gradient") {
-    const meta = await sharp(subject).metadata();
-    if (!meta.width || !meta.height) throw new Error("Cannot read subject dimensions");
-    const gradBg = await createGradientBackground(
-      meta.width,
-      meta.height,
-      settings.gradientColor1 ?? "#ffffff",
-      settings.gradientColor2 ?? "#000000",
-      settings.gradientAngle,
+  let subjectPng: Buffer;
+  try {
+    subjectPng = await removeBackground(
+      input,
+      ctx.scratchDir,
+      { signal: ctx.signal, toolId: "background-replace" },
+      (percent, stage) => {
+        // Scale rembg progress into 5..80 range
+        const scaled = 5 + Math.round(percent * 0.75);
+        ctx.report(Math.min(scaled, 80), stage);
+      },
     );
-    composited = await sharp(gradBg)
-      .composite([{ input: subject, blend: "over" }])
-      .png()
-      .toBuffer();
-  } else {
-    composited = await compositeOnColor(subject, settings.color);
+  } catch (err) {
+    throw await asInputErrorIfUndecodable(input, err);
   }
 
-  // Encode to requested output format
-  const fmt = settings.format;
-  const result =
-    fmt === "webp" ? await sharp(composited).webp({ lossless: true }).toBuffer() : composited;
+  return withImageEncodeContext<z.infer<typeof settingsSchema>>(
+    "Background replacement failed",
+    (s) => s.format,
+    async (subjectBuf, s, filename) => {
+      // Feather alpha edges before compositing
+      let subject = subjectBuf;
+      if (s.feather > 0) {
+        ctx.report(82, "Feathering edges");
+        subject = await featherEdges(subjectBuf, s.feather);
+      }
 
-  const base = data.filename.replace(/\.[^.]+$/, "");
-  const outName = `${base}_bg.${fmt}`;
+      ctx.report(85, "Compositing background");
 
-  return {
-    buffer: result,
-    filename: outName,
-    contentType: fmt === "webp" ? "image/webp" : "image/png",
-  };
+      let composited: Buffer;
+      if (s.backgroundType === "gradient") {
+        const meta = await sharp(subject).metadata();
+        if (!meta.width || !meta.height) throw new Error("Cannot read subject dimensions");
+        const gradBg = await createGradientBackground(
+          meta.width,
+          meta.height,
+          s.gradientColor1 ?? "#ffffff",
+          s.gradientColor2 ?? "#000000",
+          s.gradientAngle,
+        );
+        composited = await sharp(gradBg)
+          .composite([{ input: subject, blend: "over" }])
+          .png()
+          .toBuffer();
+      } else {
+        composited = await compositeOnColor(subject, s.color);
+      }
+
+      // Encode to requested output format
+      const fmt = s.format;
+      const result =
+        fmt === "webp" ? await sharp(composited).webp({ lossless: true }).toBuffer() : composited;
+
+      const base = filename.replace(/\.[^.]+$/, "");
+      const outName = `${base}_bg.${fmt}`;
+
+      return {
+        buffer: result,
+        filename: outName,
+        contentType: fmt === "webp" ? "image/webp" : "image/png",
+      };
+    },
+  )(subjectPng, settings, data.filename, ctx);
 });
 
 export function registerBackgroundReplace(app: FastifyInstance) {

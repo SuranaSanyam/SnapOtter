@@ -24,6 +24,7 @@ import {
   needsCliDecode,
 } from "../../lib/format-decoders.js";
 import { decodeHeic } from "../../lib/heic-converter.js";
+import { asInputErrorIfUndecodable, withImageEncodeContext } from "../../lib/image-error.js";
 import { multipartFailure } from "../../lib/multipart-parts.js";
 import { discardUnenqueuedUploads, hasPersistedJobRow } from "../../lib/upload-cleanup.js";
 import { receiveUpload } from "../../lib/upload-stream.js";
@@ -42,59 +43,75 @@ registerAiJobHandler("blur-background", async (input, data, ctx) => {
 
   ctx.report(5, "Removing background");
 
-  const subjectPng = await removeBackground(
-    input,
-    ctx.scratchDir,
-    { signal: ctx.signal, toolId: "blur-background" },
-    (percent, stage) => {
-      // Scale rembg progress into 5..80 range
-      const scaled = 5 + Math.round(percent * 0.75);
-      ctx.report(Math.min(scaled, 80), stage);
-    },
-  );
+  let subjectPng: Buffer;
+  try {
+    subjectPng = await removeBackground(
+      input,
+      ctx.scratchDir,
+      { signal: ctx.signal, toolId: "blur-background" },
+      (percent, stage) => {
+        // Scale rembg progress into 5..80 range
+        const scaled = 5 + Math.round(percent * 0.75);
+        ctx.report(Math.min(scaled, 80), stage);
+      },
+    );
+  } catch (err) {
+    throw await asInputErrorIfUndecodable(input, err);
+  }
 
   ctx.report(85, "Blurring background");
 
-  // If feather > 0, soften the subject alpha edge before compositing. Read the
-  // subject as raw RGBA plus a separately-blurred copy of its alpha and
-  // overwrite the alpha bytes in place; joinChannel does not reliably re-tag the
-  // merged channel as alpha.
-  let compositeSubject = subjectPng;
-  if (settings.feather > 0) {
-    const { data: rgba, info } = await sharp(subjectPng)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const { data: blurredAlpha } = await sharp(subjectPng)
-      .extractChannel(3)
-      .blur(settings.feather)
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    for (let p = 3, a = 0; p < rgba.length; p += 4, a++) {
-      rgba[p] = blurredAlpha[a];
-    }
-    compositeSubject = await sharp(rgba, {
-      raw: { width: info.width, height: info.height, channels: 4 },
-    })
-      .png()
-      .toBuffer();
-  }
+  return withImageEncodeContext<z.infer<typeof settingsSchema>>(
+    "Background blur failed",
+    (s) => s.format,
+    async (inputBuffer, s, filename) => {
+      // If feather > 0, soften the subject alpha edge before compositing. Read the
+      // subject as raw RGBA plus a separately-blurred copy of its alpha and
+      // overwrite the alpha bytes in place; joinChannel does not reliably re-tag the
+      // merged channel as alpha.
+      let compositeSubject = subjectPng;
+      if (s.feather > 0) {
+        const { data: rgba, info } = await sharp(subjectPng)
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        const { data: blurredAlpha } = await sharp(subjectPng)
+          .extractChannel(3)
+          .blur(s.feather)
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        for (let p = 3, a = 0; p < rgba.length; p += 4, a++) {
+          rgba[p] = blurredAlpha[a];
+        }
+        compositeSubject = await sharp(rgba, {
+          raw: { width: info.width, height: info.height, channels: 4 },
+        })
+          .png()
+          .toBuffer();
+      }
 
-  const blurred = await blurBackground(input, compositeSubject, settings.intensity);
+      let blurred: Buffer;
+      try {
+        blurred = await blurBackground(inputBuffer, compositeSubject, s.intensity);
+      } catch (err) {
+        throw await asInputErrorIfUndecodable(inputBuffer, err);
+      }
 
-  // Encode in the requested output format
-  const fmt = settings.format;
-  const base = data.filename.replace(/\.[^.]+$/, "");
-  const outName = `${base}_blurbg.${fmt}`;
-  const contentType = fmt === "webp" ? "image/webp" : "image/png";
-  const result =
-    fmt === "webp" ? await sharp(blurred).webp({ lossless: true }).toBuffer() : blurred; // blurBackground already returns PNG
+      // Encode in the requested output format
+      const fmt = s.format;
+      const base = filename.replace(/\.[^.]+$/, "");
+      const outName = `${base}_blurbg.${fmt}`;
+      const contentType = fmt === "webp" ? "image/webp" : "image/png";
+      const result =
+        fmt === "webp" ? await sharp(blurred).webp({ lossless: true }).toBuffer() : blurred; // blurBackground already returns PNG
 
-  return {
-    buffer: result,
-    filename: outName,
-    contentType,
-  };
+      return {
+        buffer: result,
+        filename: outName,
+        contentType,
+      };
+    },
+  )(input, settings, data.filename, ctx);
 });
 
 export function registerBlurBackground(app: FastifyInstance) {
