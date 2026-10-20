@@ -7,6 +7,7 @@ import {
   FEATURE_BUNDLES,
   formatTargetKb,
   hasServerErrorStatus,
+  isSafeMessageError,
   isToolInputError,
   kbToBytes,
   PASSPORT_SPECS,
@@ -38,6 +39,7 @@ import {
   putObject,
 } from "../../lib/object-storage.js";
 import { isUniqueViolation } from "../../lib/pg-errors.js";
+import { withRouteScratch } from "../../lib/route-scratch.js";
 import { getAuthUser } from "../../plugins/auth.js";
 import { updateSingleFileProgress } from "../progress.js";
 import { registerToolProcessFn } from "../tool-factory.js";
@@ -243,19 +245,14 @@ export function registerPassportPhoto(app: FastifyInstance) {
         }
 
         // Auto-orient to fix EXIF rotation
-        fileBuffer = await autoOrient(fileBuffer);
+        const orientedBuffer = await autoOrient(fileBuffer);
 
         request.log.info(
-          { toolId: "passport-photo", imageSize: fileBuffer.length },
+          { toolId: "passport-photo", imageSize: orientedBuffer.length },
           "Starting passport photo analysis",
         );
 
         const jobId = randomUUID();
-        const scratchDir = join(tmpdir(), "snapotter-scratch", jobId);
-        await mkdir(scratchDir, { recursive: true });
-
-        // Save original to object storage for generate phase
-        await putObject(`uploads/${jobId}/${filename}`, fileBuffer);
 
         // Progress callback
         const jobIdForProgress = clientJobId;
@@ -279,11 +276,11 @@ export function registerPassportPhoto(app: FastifyInstance) {
 
         let landmarksResult: Awaited<ReturnType<typeof detectFaceLandmarks>>;
         try {
-          landmarksResult = await detectFaceLandmarks(fileBuffer, landmarkProgress, {
+          landmarksResult = await detectFaceLandmarks(orientedBuffer, landmarkProgress, {
             toolId: "passport-photo",
           });
         } catch (err) {
-          throw await asInputErrorIfUndecodable(fileBuffer, err);
+          throw await asInputErrorIfUndecodable(orientedBuffer, err);
         }
 
         if (!landmarksResult.faceDetected || !landmarksResult.landmarks) {
@@ -293,6 +290,11 @@ export function registerPassportPhoto(app: FastifyInstance) {
               phase: "complete",
               percent: 100,
               result: { jobId, faceDetected: false },
+            }).catch((persistErr) => {
+              request.log.error(
+                { err: persistErr, jobId: clientJobId, toolId: "passport-photo" },
+                "Failed to persist passport photo analysis progress",
+              );
             });
           }
           return reply.status(422).send({
@@ -309,25 +311,18 @@ export function registerPassportPhoto(app: FastifyInstance) {
             }
           : undefined;
 
-        let bgRemovedBuffer: Buffer;
-        try {
+        const bgRemovedBuffer = await withRouteScratch("passport-photo", async (scratchDir) => {
           try {
-            bgRemovedBuffer = await removeBackground(
-              fileBuffer,
+            return await removeBackground(
+              orientedBuffer,
               scratchDir,
               { model: "birefnet-portrait", toolId: "passport-photo" },
               bgProgress,
             );
           } catch (err) {
-            throw await asInputErrorIfUndecodable(fileBuffer, err);
+            throw await asInputErrorIfUndecodable(orientedBuffer, err);
           }
-        } finally {
-          await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
-        }
-
-        // Save bg-removed image to object storage for generate phase
-        const bgRemovedFilename = `${filename.replace(/\.[^.]+$/, "")}_nobg.png`;
-        await putObject(`outputs/${jobId}/${bgRemovedFilename}`, bgRemovedBuffer);
+        });
 
         // Create a smaller preview for fast transfer (max 800px wide)
         const meta = await sharp(bgRemovedBuffer).metadata();
@@ -339,12 +334,21 @@ export function registerPassportPhoto(app: FastifyInstance) {
 
         const preview = previewBuffer.data.toString("base64");
 
+        // Save bg-removed image to object storage for generate phase
+        const bgRemovedFilename = `${filename.replace(/\.[^.]+$/, "")}_nobg.png`;
+        await putObject(`outputs/${jobId}/${bgRemovedFilename}`, bgRemovedBuffer);
+
         if (clientJobId) {
           await updateSingleFileProgress({
             jobId: clientJobId,
             phase: "complete",
             percent: 100,
             result: { jobId, faceDetected: true },
+          }).catch((persistErr) => {
+            request.log.error(
+              { err: persistErr, jobId: clientJobId, toolId: "passport-photo" },
+              "Failed to persist passport photo analysis progress",
+            );
           });
         }
 
@@ -359,6 +363,24 @@ export function registerPassportPhoto(app: FastifyInstance) {
           imageHeight: landmarksResult.imageHeight,
         });
       } catch (err) {
+        const details = err instanceof Error ? err.message : "Unknown error";
+        const progressError =
+          hasServerErrorStatus(err) && !isSafeMessageError(err)
+            ? "Passport photo analysis failed"
+            : details;
+        if (clientJobId) {
+          await updateSingleFileProgress({
+            jobId: clientJobId,
+            phase: "failed",
+            percent: 0,
+            error: progressError,
+          }).catch((persistErr) => {
+            request.log.error(
+              { err: persistErr, jobId: clientJobId, toolId: "passport-photo" },
+              "Failed to persist passport photo analysis progress",
+            );
+          });
+        }
         if (isDecoderUnavailable(err)) throw err;
         if (hasServerErrorStatus(err)) throw err;
         if (!isToolInputError(err)) {
@@ -366,7 +388,7 @@ export function registerPassportPhoto(app: FastifyInstance) {
         }
         return reply.status(422).send({
           error: "Passport photo analysis failed",
-          details: err instanceof Error ? err.message : "Unknown error",
+          details,
         });
       }
     },
