@@ -399,12 +399,55 @@ describe("POST /api/v1/tools/image/passport-photo/analyze cleanup and progress s
     expect(existsSync(observedScratchDir)).toBe(false);
     expect(putObject).toHaveBeenCalledTimes(1);
     expect(putObject).toHaveBeenCalledWith(`outputs/${body.jobId}/portrait_nobg.png`, validPng);
+    expect(dbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: body.jobId,
+        toolId: "passport-photo",
+        type: "single",
+        status: "completed",
+        outputRefs: [`outputs/${body.jobId}/portrait_nobg.png`],
+      }),
+    );
     expect(updateSingleFileProgress).toHaveBeenCalledWith({
       jobId: "client-job-ok",
       phase: "complete",
       percent: 100,
       result: { jobId: body.jobId, faceDetected: true },
     });
+  });
+
+  it("records the analysing user as the owner generate checks, before storing the cutout", async () => {
+    await app.close();
+    app = Fastify();
+    app.addHook("onRequest", async (req) => {
+      (req as typeof req & { user?: unknown }).user = { id: "analyst-1" };
+    });
+    await app.register(multipart);
+    registerErrorHandler(app);
+    registerPassportPhoto(app);
+    await app.ready();
+    detectFaceLandmarks.mockResolvedValueOnce({
+      faceDetected: true,
+      landmarks: SAMPLE_LANDMARKS,
+      imageWidth: 32,
+      imageHeight: 32,
+    });
+    removeBackground.mockResolvedValueOnce(validPng);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/tools/image/passport-photo/analyze",
+      ...buildAnalyzeMultipart(validPng),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(dbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ id: res.json().jobId, userId: "analyst-1" }),
+    );
+    // The row goes in first, so a failed insert never leaves a rowless cutout.
+    expect(dbInsertValues.mock.invocationCallOrder[0]).toBeLessThan(
+      putObject.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("bench-ai.sh posts passport-photo to /analyze and resolves a 200 benchmark response (#3000)", async () => {

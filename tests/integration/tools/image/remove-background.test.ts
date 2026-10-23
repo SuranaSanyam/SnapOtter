@@ -12,14 +12,17 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../../../../apps/api/src/config.js";
-import { putObject } from "../../../../apps/api/src/lib/object-storage.js";
+import { db, schema } from "../../../../apps/api/src/db/index.js";
+import { listObjects, putObject } from "../../../../apps/api/src/lib/object-storage.js";
 import { fixtures, readFixture } from "../../../fixtures/index.js";
 import {
   buildTestApp,
   createMultipartPayload,
+  createUserAndLogin,
   loginAsAdmin,
   type TestApp,
 } from "../../test-server.js";
@@ -488,7 +491,7 @@ describe("Remove Background", () => {
     const jobId = randomUUID();
     await mkdir(join(env.WORKSPACE_PATH, "outputs", jobId, "test_mask.png"), { recursive: true });
     await putObject(
-      `outputs/${jobId}/test_original.png`,
+      `uploads/${jobId}/test_original.png`,
       await sharp({
         create: { width: 8, height: 8, channels: 3, background: "#888" },
       })
@@ -780,8 +783,9 @@ async function getFileDetail(id: string) {
 
 /**
  * Seed the cached Phase 1 artifacts the effects route reads: a transparent
- * subject (`_mask.png`) and the original (`_original.png`) under the job's
- * output prefix, both matching the `<base>` derived from the filename.
+ * subject (`_mask.png`) under the job's output prefix and the original
+ * (`_original.png`) under its upload prefix, which the download route never
+ * serves. Both match the `<base>` derived from the filename.
  */
 async function seedPhase1Cache(jobId: string, base: string): Promise<void> {
   const mask = await sharp({
@@ -795,7 +799,7 @@ async function seedPhase1Cache(jobId: string, base: string): Promise<void> {
     .png()
     .toBuffer();
   await putObject(`outputs/${jobId}/${base}_mask.png`, mask);
-  await putObject(`outputs/${jobId}/${base}_original.png`, original);
+  await putObject(`uploads/${jobId}/${base}_original.png`, original);
 }
 
 function effectsPayload(fields: Array<{ name: string; content: string }>) {
@@ -923,5 +927,94 @@ describe("Remove Background effects route: library saveMode", () => {
 
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/saveMode/i);
+  });
+});
+
+describe("Remove Background effects route: Phase 1 ownership", () => {
+  // The effects route takes Phase 1's jobId from the client, so it used to
+  // read any user's stored original and mask and write into their prefix.
+  let owner: { token: string; userId: string };
+  let intruder: { token: string; userId: string };
+
+  beforeAll(async () => {
+    owner = await createUserAndLogin(app, "rmbgowner");
+    intruder = await createUserAndLogin(app, "rmbgintruder");
+  });
+
+  async function seedOwnedPhase1(): Promise<string> {
+    const jobId = randomUUID();
+    await db.insert(schema.jobs).values({
+      id: jobId,
+      userId: owner.userId,
+      toolId: "remove-background",
+      type: "single",
+      status: "completed",
+      inputRefs: [],
+      completedAt: new Date(),
+    });
+    await seedPhase1Cache(jobId, "test");
+    return jobId;
+  }
+
+  function effectsAs(token: string, jobId: string) {
+    const { body, contentType } = effectsPayload([
+      {
+        name: "settings",
+        content: JSON.stringify({
+          jobId,
+          filename: "test.png",
+          backgroundType: "color",
+          backgroundColor: "#ff0000",
+        }),
+      },
+    ]);
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/tools/image/remove-background/effects",
+      headers: { authorization: `Bearer ${token}`, "content-type": contentType },
+      body,
+    });
+  }
+
+  it("answers 404 to another user and writes nothing into the owner's prefix", async () => {
+    const jobId = await seedOwnedPhase1();
+
+    const res = await effectsAs(intruder.token, jobId);
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body)).toEqual({ error: "Job not found" });
+    const keys = (await listObjects(`outputs/${jobId}/`)).map((o) => o.key);
+    expect(keys).toEqual([`outputs/${jobId}/test_mask.png`]);
+  });
+
+  it("answers 404 to a non-admin for a jobId no job row owns", async () => {
+    const jobId = randomUUID();
+    await seedPhase1Cache(jobId, "test");
+
+    const res = await effectsAs(intruder.token, jobId);
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("lets a files:all holder work on another user's job", async () => {
+    const jobId = await seedOwnedPhase1();
+
+    const res = await effectsAs(adminToken, jobId);
+
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+  });
+
+  it("serves the owner and stores the result under a fresh job they own", async () => {
+    const jobId = await seedOwnedPhase1();
+
+    const res = await effectsAs(owner.token, jobId);
+
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.jobId).not.toBe(jobId);
+    expect(body.downloadUrl).toBe(`/api/v1/download/${body.jobId}/test_nobg.png`);
+    const [row] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, body.jobId));
+    expect(row?.userId).toBe(owner.userId);
+    expect(row?.outputRefs).toEqual([`outputs/${body.jobId}/test_nobg.png`]);
   });
 });

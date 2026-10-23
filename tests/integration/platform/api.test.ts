@@ -687,14 +687,14 @@ describe("File upload/download", () => {
       expect(row.toolId).toBe("upload");
       expect(row.userId).toBeTruthy();
       expect(row.completedAt).toBeInstanceOf(Date);
-      expect(row.outputRefs).toEqual([`uploads/${jobId}/staged-ttl.png`]);
+      expect(row.outputRefs).toEqual([`outputs/${jobId}/staged-ttl.png`]);
 
       const rowsById = new Map([
         [row.id, { createdAt: row.createdAt, completedAt: row.completedAt }],
       ]);
       expect(
         decideExpiry(
-          { key: `uploads/${jobId}`, size: 0, mtimeMs: 0 },
+          { key: `outputs/${jobId}`, size: 0, mtimeMs: 0 },
           Date.now() + 60_000,
           rowsById,
         ),
@@ -3946,12 +3946,12 @@ describe("Workspace integrity", () => {
     });
     expect(outputRes.statusCode).toBe(200);
 
-    // Input file is also saved in workspace (from tool-factory.ts)
+    // Raw input file in uploads/ is not publicly downloadable via /api/v1/download
     const inputRes = await app.inject({
       method: "GET",
       url: `/api/v1/download/${jobId}/ws-tool.png`,
     });
-    expect(inputRes.statusCode).toBe(200);
+    expect(inputRes.statusCode).toBe(404);
   });
 
   it("each job gets a unique workspace (no cross-contamination)", async () => {

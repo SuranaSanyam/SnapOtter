@@ -14,12 +14,14 @@ import {
   PRINT_LAYOUTS,
   ToolInputError,
 } from "@snapotter/shared";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import sharp, { type OverlayOptions } from "sharp";
 import { z } from "zod";
 import { db, schema } from "../../db/index.js";
 import { INVALID_CLIENT_JOB_ID_ERROR, parseClientJobIdField } from "../../jobs/types.js";
 import { autoOrient } from "../../lib/auto-orient.js";
+import { recordCompletedToolJob } from "../../lib/completed-job.js";
 import { formatZodErrors, stripInternalPaths } from "../../lib/errors.js";
 import { getFirstMissingBundleForTool } from "../../lib/feature-status.js";
 import { validateImageBuffer } from "../../lib/file-validation.js";
@@ -40,6 +42,7 @@ import {
 import { isUniqueViolation } from "../../lib/pg-errors.js";
 import { withRouteScratch } from "../../lib/route-scratch.js";
 import { InputValidationError } from "../../modality/contract.js";
+import { hasEffectivePermission } from "../../permissions.js";
 import { getAuthUser } from "../../plugins/auth.js";
 import { updateSingleFileProgress } from "../progress.js";
 import { registerToolProcessFn } from "../tool-factory.js";
@@ -326,9 +329,17 @@ export function registerPassportPhoto(app: FastifyInstance) {
 
         const preview = previewBuffer.data.toString("base64");
 
-        // Save bg-removed image to object storage for generate phase
+        // Save bg-removed image to object storage for generate phase. The row
+        // records who ran the analysis, which generate checks before reading it.
         const bgRemovedFilename = `${filename.replace(/\.[^.]+$/, "")}_nobg.png`;
-        await putObject(`outputs/${jobId}/${bgRemovedFilename}`, bgRemovedBuffer);
+        const bgRemovedKey = `outputs/${jobId}/${bgRemovedFilename}`;
+        await recordCompletedToolJob({
+          jobId,
+          userId: getAuthUser(request)?.id ?? null,
+          toolId: "passport-photo",
+          outputRefs: [bgRemovedKey],
+        });
+        await putObject(bgRemovedKey, bgRemovedBuffer);
 
         if (clientJobId) {
           await updateSingleFileProgress({
@@ -481,6 +492,18 @@ export function registerPassportPhoto(app: FastifyInstance) {
       if (!isValidObjectKey(bgRemovedKey)) {
         return reply.status(400).send({ error: "Invalid jobId or filename" });
       }
+      // The jobId comes from the client, so only the user who ran Phase 1 (or
+      // a files:all holder) may read its outputs. 404 hides whether it exists.
+      const user = getAuthUser(request);
+      if (user) {
+        const [job] = await db
+          .select({ userId: schema.jobs.userId })
+          .from(schema.jobs)
+          .where(eq(schema.jobs.id, jobId));
+        if (job?.userId !== user.id && !(await hasEffectivePermission(user, "files:all"))) {
+          return reply.status(404).send({ error: "Job not found" });
+        }
+      }
       let bgRemovedBuffer: Buffer;
       try {
         bgRemovedBuffer = await getObjectBuffer(bgRemovedKey);
@@ -610,13 +633,18 @@ export function registerPassportPhoto(app: FastifyInstance) {
           }
         }
 
-        // Save output
-        const outputFilename = `${filename.replace(/\.[^.]+$/, "")}_passport.jpg`;
-        await putObject(`outputs/${jobId}/${outputFilename}`, cropped);
+        // Store under a fresh server-generated jobId so Phase 2 never writes
+        // into a client-selected prefix or exposes the Phase 1 jobId.
+        const outputJobId = randomUUID();
+        const stem = filename.replace(/\.[^.]+$/, "");
+        const outputFilename = `${stem}_passport.jpg`;
+        const outputs: { key: string; buffer: Buffer }[] = [
+          { key: `outputs/${outputJobId}/${outputFilename}`, buffer: cropped },
+        ];
 
         const response: Record<string, unknown> = {
-          jobId,
-          downloadUrl: `/api/v1/download/${jobId}/${encodeURIComponent(outputFilename)}`,
+          jobId: outputJobId,
+          downloadUrl: `/api/v1/download/${outputJobId}/${encodeURIComponent(outputFilename)}`,
           dimensions: {
             widthMm: docSpec.width,
             heightMm: docSpec.height,
@@ -642,10 +670,20 @@ export function registerPassportPhoto(app: FastifyInstance) {
           );
 
           if (printBuffer) {
-            const printFilename = `${filename.replace(/\.[^.]+$/, "")}_passport_print_${printLayout}.jpg`;
-            await putObject(`outputs/${jobId}/${printFilename}`, printBuffer);
-            response.printDownloadUrl = `/api/v1/download/${jobId}/${encodeURIComponent(printFilename)}`;
+            const printFilename = `${stem}_passport_print_${printLayout}.jpg`;
+            outputs.push({ key: `outputs/${outputJobId}/${printFilename}`, buffer: printBuffer });
+            response.printDownloadUrl = `/api/v1/download/${outputJobId}/${encodeURIComponent(printFilename)}`;
           }
+        }
+
+        await recordCompletedToolJob({
+          jobId: outputJobId,
+          userId: user?.id ?? null,
+          toolId: "passport-photo",
+          outputRefs: outputs.map((o) => o.key),
+        });
+        for (const { key, buffer } of outputs) {
+          await putObject(key, buffer);
         }
 
         return reply.send(response);
