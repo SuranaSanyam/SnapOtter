@@ -1,3 +1,4 @@
+import { SUPPORTED_LOCALES } from "@snapotter/shared";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { env } from "../config.js";
@@ -5,13 +6,32 @@ import { db, schema } from "../db/index.js";
 import { isEnterpriseFeatureEnabled } from "../lib/enterprise-feature.js";
 import { getSettingStrict } from "../lib/settings-helpers.js";
 
+let supportedLocaleCodes: ReadonlySet<string> | undefined;
+
+function isSupportedLocale(value: string): boolean {
+  supportedLocaleCodes ??= new Set(SUPPORTED_LOCALES.map((locale) => locale.code));
+  return supportedLocaleCodes.has(value);
+}
+
 export async function configRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/api/v1/config/locale", async (_request, reply) => {
+  app.get("/api/v1/config/locale", async (request, reply) => {
     const [row] = await db
       .select()
       .from(schema.settings)
       .where(eq(schema.settings.key, "defaultLocale"));
-    return reply.send({ defaultLocale: row?.value ?? "en" });
+    const fallbackLocale =
+      env.DEFAULT_LOCALE && isSupportedLocale(env.DEFAULT_LOCALE) ? env.DEFAULT_LOCALE : "en";
+    if (!row) {
+      return reply.send({ defaultLocale: fallbackLocale });
+    }
+    if (!isSupportedLocale(row.value)) {
+      request.log.warn(
+        { value: row.value, fallbackLocale },
+        "defaultLocale setting holds an unsupported value; using fallback",
+      );
+      return reply.send({ defaultLocale: fallbackLocale });
+    }
+    return reply.send({ defaultLocale: row.value });
   });
 
   // Public config endpoint (for frontend to know if auth is required)
