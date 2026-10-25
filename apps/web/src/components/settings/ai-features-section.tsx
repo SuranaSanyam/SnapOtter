@@ -17,10 +17,23 @@ import { bundleDescription, bundleName } from "@/lib/bundle-i18n";
 import { format, formatFileSize } from "@/lib/format";
 import { useFeaturesStore } from "@/stores/features-store";
 
-function formatTimeRemaining(ms: number, t: TranslationKeys): string {
+export function formatTimeRemaining(ms: number, t: TranslationKeys, locale: string): string {
   if (ms < 60000) return t.features.lessThanMinute;
   const mins = Math.round(ms / 60000);
-  if (mins === 1) return t.features.oneMinuteLeft;
+
+  let rule = "other";
+  try {
+    rule = new Intl.PluralRules(locale).select(mins);
+  } catch (err) {
+    // If the locale is invalid or unsupported, fallback to default 'other' behavior
+    console.error(`Invalid locale for PluralRules: ${locale}`, err);
+  }
+
+  if (rule === "one" && t.features.oneMinuteLeft) return format(t.features.oneMinuteLeft, { mins });
+  if (rule === "two" && t.features.minutesLeftTwo)
+    return format(t.features.minutesLeftTwo, { mins });
+  if (rule === "few" && t.features.minutesLeftFew)
+    return format(t.features.minutesLeftFew, { mins });
   return format(t.features.minutesLeft, { mins });
 }
 
@@ -434,7 +447,7 @@ function BundleCard({
   isQueued: boolean;
   startTime: number | null;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [confirming, setConfirming] = useState(false);
   const incompatible = bundle.compatibility === "incompatible";
   const displayedError = error ?? bundle.error;
@@ -459,7 +472,7 @@ function BundleCard({
     const rate = progress.percent / elapsed;
     if (rate <= 0) return null;
     const remaining = (100 - progress.percent) / rate;
-    return formatTimeRemaining(remaining, t);
+    return formatTimeRemaining(remaining, t, locale);
   })();
 
   return (
