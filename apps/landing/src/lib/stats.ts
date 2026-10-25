@@ -15,7 +15,7 @@
 // 176,180. A scheduled rebuild cannot refresh a number no build ever reads.
 const GHCR_PACKAGE_URL =
   "https://github.com/users/snapotter-hq/packages/container/package/snapotter";
-const GHCR_FALLBACK = 218_000; // live 2026-09-29: 218,100
+const GHCR_FALLBACK = 275_000;
 
 // Fallbacks for when an upstream fetch fails. These are a safety net, not a
 // source of truth: a successful build overwrites them with live values, and the
@@ -29,7 +29,7 @@ const GHCR_FALLBACK = 218_000; // live 2026-09-29: 218,100
 // below now puts it in the build log. Re-check these whenever you touch this
 // file.
 const STAR_FALLBACK = 2_630; // live 2026-09-12: 2,636
-const DOCKER_FALLBACK = 580_000; // live 2026-09-29: 580,677
+const DOCKER_FALLBACK = 728_000;
 
 const GITHUB_REPO = "snapotter-hq/SnapOtter";
 const DOCKERHUB_REPO = "snapotter/snapotter";
