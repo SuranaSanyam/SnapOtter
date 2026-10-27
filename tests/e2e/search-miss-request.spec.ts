@@ -39,6 +39,7 @@ test.describe("search-miss tool request", () => {
           enabled: true,
           posthogApiKey: "phc_e2e",
           posthogHost: "http://127.0.0.1:9",
+          feedbackSink: true,
         },
       });
     });
@@ -59,5 +60,41 @@ test.describe("search-miss tool request", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Request a tool");
     await expect(dialog).toContainText("zzxqwv nonexistent capability");
+  });
+
+  test("falls back to Discussions when a baked key has no feedback sink (#2252)", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/config/analytics", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      // A key is baked, but the server has no PostHog client to take the
+      // answer, so the in-app dialog would decline it. The affordance must
+      // stay the Discussions link.
+      await route.fulfill({
+        json: {
+          ...body,
+          enabled: true,
+          posthogApiKey: "phc_e2e",
+          feedbackSink: false,
+          posthogHost: "http://127.0.0.1:9",
+        },
+      });
+    });
+
+    // Wait for the mocked config to land: the Discussions link is also the
+    // pre-config fallback, so asserting it before the fetch would prove
+    // nothing about the gate.
+    const configLoaded = page.waitForResponse("**/api/v1/config/analytics");
+    await page.goto("/");
+    await configLoaded;
+
+    const searchInput = page.locator("[data-search-input]");
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill("zzxqwv nonexistent capability");
+
+    const request = page.getByTestId("request-tool").first();
+    await expect(request).toBeVisible();
+    await expect(request).toHaveAttribute("href", /\/discussions\/new/);
   });
 });
