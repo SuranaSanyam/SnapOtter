@@ -1436,6 +1436,8 @@ export const es: TranslationKeys = {
       submit: "Redimensionar",
       submitBatch: "Redimensionar ({count} archivos)",
       progressLabel: "Redimensionando",
+      maxDimensionExceeded: "Usa un tamaño de 1 a {max} px.",
+      maxPercentageExceeded: "Usa una escala de 1 a {max} %.",
     },
     crop: {
       width: "Ancho",
@@ -2080,6 +2082,9 @@ export const es: TranslationKeys = {
       submitSubject: "Recorte inteligente",
       submitFace: "Recorte facial",
       submitTrim: "Recortar bordes",
+      maxDimensionExceeded: "Usa un tamaño de 1 a {max} px.",
+      cropAreaExceeded:
+        "Este recorte supera el límite de {max} píxeles. Reduce el ancho, el alto o el relleno.",
     },
     imageEnhancement: {
       enhancementMode: "Modo de mejora",
@@ -2206,6 +2211,9 @@ export const es: TranslationKeys = {
       submit: "Redimensionar",
       submitBatch: "Redimensionar ({count} archivos)",
       progressLabel: "Redimensionando con reconocimiento de contenido",
+      maxDimensionExceeded: "Usa un tamaño de 1 a {max} px.",
+      areaExceeded:
+        "El cambio de tamaño según el contenido está limitado a {max} píxeles en total. Reduce la anchura o la altura.",
     },
     "ai-canvas-expand": {
       quality: "Calidad",
@@ -3255,6 +3263,7 @@ export const es: TranslationKeys = {
       submit: "Procesar GIF",
       submitBatch: "Procesar ({count} archivos)",
       progressLabel: "Procesando GIF",
+      maxDimensionExceeded: "Usa un tamaño de 1 a {max} px.",
     },
     "image-to-base64": {
       converting: "Convirtiendo...",
@@ -3700,8 +3709,7 @@ export const es: TranslationKeys = {
       bestEffortHint:
         "Máximo posible. Los PDF basados en imágenes se acercan; los PDF de solo texto quizá no se reduzcan a este tamaño.",
       targetReached: "Se alcanzó el objetivo de {target} (resultado: {size}).",
-      targetMissed:
-        "No se pudo alcanzar {target}. El tamaño más pequeño posible fue {size} porque este PDF es principalmente texto o vectores, que la compresión de imágenes no puede reducir.",
+      targetMissed: "No se pudo alcanzar {target}. El tamaño más pequeño posible fue {size}.",
     },
     "rotate-pdf": {
       angle: "Ángulo de rotación",

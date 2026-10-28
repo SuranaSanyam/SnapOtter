@@ -1454,6 +1454,8 @@ export const nl: TranslationKeys = {
       submit: "Formaat wijzigen",
       submitBatch: "Formaat wijzigen ({count} bestanden)",
       progressLabel: "Formaat wijzigen",
+      maxDimensionExceeded: "Gebruik een formaat van 1 tot {max} px.",
+      maxPercentageExceeded: "Gebruik een schaal van 1 tot {max}%.",
     },
     crop: {
       width: "Breedte",
@@ -2096,6 +2098,9 @@ export const nl: TranslationKeys = {
       submitSubject: "Slim bijsnijden",
       submitFace: "Gezicht bijsnijden",
       submitTrim: "Randen bijsnijden",
+      maxDimensionExceeded: "Gebruik een formaat van 1 tot {max} px.",
+      cropAreaExceeded:
+        "Deze uitsnede overschrijdt de limiet van {max} pixels. Verklein de breedte, hoogte of opvulling.",
     },
     imageEnhancement: {
       enhancementMode: "Verbeteringsmodus",
@@ -2222,6 +2227,9 @@ export const nl: TranslationKeys = {
       submit: "Formaat wijzigen",
       submitBatch: "Formaat wijzigen ({count} bestanden)",
       progressLabel: "Inhoudsbewust schalen",
+      maxDimensionExceeded: "Gebruik een formaat van 1 tot {max} px.",
+      areaExceeded:
+        "Inhoudsbewust formaat wijzigen is beperkt tot {max} pixels in totaal. Verlaag de breedte of hoogte.",
     },
     "ai-canvas-expand": {
       quality: "Kwaliteit",
@@ -3276,6 +3284,7 @@ export const nl: TranslationKeys = {
       submit: "GIF verwerken",
       submitBatch: "Verwerken ({count} bestanden)",
       progressLabel: "GIF verwerken",
+      maxDimensionExceeded: "Gebruik een formaat van 1 tot {max} px.",
     },
     "image-to-base64": {
       converting: "Converteren...",
@@ -3721,8 +3730,7 @@ export const nl: TranslationKeys = {
       bestEffortHint:
         "Maximaal haalbaar. Op afbeeldingen gebaseerde PDF's komen dichtbij; PDF's met alleen tekst worden mogelijk niet tot deze grootte verkleind.",
       targetReached: "Doel van {target} bereikt (resultaat: {size}).",
-      targetMissed:
-        "Kon {target} niet bereiken. De kleinst haalbare grootte was {size}, omdat deze PDF voornamelijk uit tekst of vectoren bestaat, die beeldcompressie niet kan verkleinen.",
+      targetMissed: "Kon {target} niet bereiken. De kleinst haalbare grootte was {size}.",
     },
     "rotate-pdf": {
       angle: "Rotatiehoek",

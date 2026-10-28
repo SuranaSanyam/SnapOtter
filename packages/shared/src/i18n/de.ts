@@ -1455,6 +1455,8 @@ export const de: TranslationKeys = {
       submit: "Größe ändern",
       submitBatch: "Größe ändern ({count} Dateien)",
       progressLabel: "Größe wird geändert",
+      maxDimensionExceeded: "Verwende eine Größe von 1 bis {max} px.",
+      maxPercentageExceeded: "Verwende eine Skalierung von 1 bis {max} %.",
     },
     crop: {
       width: "Breite",
@@ -2101,6 +2103,9 @@ export const de: TranslationKeys = {
       submitSubject: "Intelligenter Zuschnitt",
       submitFace: "Gesichtszuschnitt",
       submitTrim: "Ränder beschneiden",
+      maxDimensionExceeded: "Verwende eine Größe von 1 bis {max} px.",
+      cropAreaExceeded:
+        "Dieser Zuschnitt überschreitet das Limit von {max} Pixeln. Verringere Breite, Höhe oder Abstand.",
     },
     imageEnhancement: {
       enhancementMode: "Verbesserungsmodus",
@@ -2227,6 +2232,9 @@ export const de: TranslationKeys = {
       submit: "Größe ändern",
       submitBatch: "Größe ändern ({count} Dateien)",
       progressLabel: "Inhaltsabhängige Größenänderung",
+      maxDimensionExceeded: "Verwende eine Größe von 1 bis {max} px.",
+      areaExceeded:
+        "Die inhaltsabhängige Größenänderung ist auf insgesamt {max} Pixel begrenzt. Verringere Breite oder Höhe.",
     },
     "ai-canvas-expand": {
       quality: "Qualität",
@@ -3284,6 +3292,7 @@ export const de: TranslationKeys = {
       submit: "GIF verarbeiten",
       submitBatch: "Verarbeiten ({count} Dateien)",
       progressLabel: "GIF wird verarbeitet",
+      maxDimensionExceeded: "Verwende eine Größe von 1 bis {max} px.",
     },
     "image-to-base64": {
       converting: "Wird konvertiert...",
@@ -3729,8 +3738,7 @@ export const de: TranslationKeys = {
       bestEffortHint:
         "Bestmögliches Maximum. Bildbasierte PDFs kommen nah heran; reine Text-PDFs schrumpfen womöglich nicht auf diese Größe.",
       targetReached: "Zielgröße {target} erreicht (Ergebnis: {size}).",
-      targetMissed:
-        "{target} konnte nicht erreicht werden. Die kleinstmögliche Größe war {size}, weil dieses PDF überwiegend aus Text oder Vektoren besteht, die die Bildkomprimierung nicht verkleinern kann.",
+      targetMissed: "{target} konnte nicht erreicht werden. Die kleinstmögliche Größe war {size}.",
     },
     "rotate-pdf": {
       angle: "Drehwinkel",

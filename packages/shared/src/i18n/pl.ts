@@ -1448,6 +1448,8 @@ export const pl: TranslationKeys = {
       submit: "Zmień rozmiar",
       submitBatch: "Zmień rozmiar ({count} plików)",
       progressLabel: "Zmiana rozmiaru",
+      maxDimensionExceeded: "Użyj rozmiaru od 1 do {max} px.",
+      maxPercentageExceeded: "Użyj skali od 1 do {max}%.",
     },
     crop: {
       width: "Szerokość",
@@ -2093,6 +2095,9 @@ export const pl: TranslationKeys = {
       submitSubject: "Inteligentne kadrowanie",
       submitFace: "Kadrowanie twarzy",
       submitTrim: "Przytnij krawędzie",
+      maxDimensionExceeded: "Użyj rozmiaru od 1 do {max} px.",
+      cropAreaExceeded:
+        "Ten kadr przekracza limit {max} pikseli. Zmniejsz szerokość, wysokość lub margines wewnętrzny.",
     },
     imageEnhancement: {
       enhancementMode: "Tryb ulepszenia",
@@ -2219,6 +2224,9 @@ export const pl: TranslationKeys = {
       submit: "Zmień rozmiar",
       submitBatch: "Zmień rozmiar ({count} plików)",
       progressLabel: "Zmiana rozmiaru z uwzględnieniem treści",
+      maxDimensionExceeded: "Użyj rozmiaru od 1 do {max} px.",
+      areaExceeded:
+        "Zmiana rozmiaru z uwzględnieniem treści jest ograniczona do łącznie {max} pikseli. Zmniejsz szerokość lub wysokość.",
     },
     "ai-canvas-expand": {
       quality: "Jakość",
@@ -3267,6 +3275,7 @@ export const pl: TranslationKeys = {
       submit: "Przetwórz GIF",
       submitBatch: "Przetwórz ({count} plików)",
       progressLabel: "Przetwarzanie GIF",
+      maxDimensionExceeded: "Użyj rozmiaru od 1 do {max} px.",
     },
     "image-to-base64": {
       converting: "Konwersja...",
@@ -3712,8 +3721,7 @@ export const pl: TranslationKeys = {
       bestEffortHint:
         "Maksimum w miarę możliwości. Pliki PDF oparte na obrazach zbliżają się do tego rozmiaru; pliki PDF zawierające tylko tekst mogą się do niego nie zmniejszyć.",
       targetReached: "Osiągnięto docelowy rozmiar {target} (wynik: {size}).",
-      targetMissed:
-        "Nie udało się osiągnąć {target}. Najmniejszy możliwy rozmiar to {size}, ponieważ ten plik PDF składa się głównie z tekstu lub wektorów, których kompresja obrazu nie może zmniejszyć.",
+      targetMissed: "Nie udało się osiągnąć {target}. Najmniejszy możliwy rozmiar to {size}.",
     },
     "rotate-pdf": {
       angle: "Kąt obrotu",

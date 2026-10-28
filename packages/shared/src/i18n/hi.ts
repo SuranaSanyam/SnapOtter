@@ -1263,6 +1263,8 @@ export const hi: TranslationKeys = {
       submit: "रीसाइज़ करें",
       submitBatch: "रीसाइज़ करें ({count} फाइलें)",
       progressLabel: "रीसाइज़ हो रहा है",
+      maxDimensionExceeded: "1 से {max} px तक का आकार इस्तेमाल करें।",
+      maxPercentageExceeded: "1 से {max}% तक का स्केल इस्तेमाल करें।",
     },
     crop: {
       width: "चौड़ाई",
@@ -1896,6 +1898,8 @@ export const hi: TranslationKeys = {
       submitSubject: "स्मार्ट क्रॉप",
       submitFace: "फेस क्रॉप",
       submitTrim: "बॉर्डर ट्रिम",
+      maxDimensionExceeded: "1 से {max} px तक का आकार इस्तेमाल करें।",
+      cropAreaExceeded: "यह क्रॉप {max} पिक्सेल की सीमा से बड़ा है। चौड़ाई, ऊंचाई या पैडिंग कम करें।",
     },
     imageEnhancement: {
       enhancementMode: "एन्हांसमेंट मोड",
@@ -2021,6 +2025,8 @@ export const hi: TranslationKeys = {
       submit: "रीसाइज़ करें",
       submitBatch: "रीसाइज़ करें ({count} फाइलें)",
       progressLabel: "कंटेंट-अवेयर रीसाइज़िंग",
+      maxDimensionExceeded: "1 से {max} px तक का आकार इस्तेमाल करें।",
+      areaExceeded: "कंटेंट-अवेयर रीसाइज़ कुल {max} पिक्सेल तक सीमित है। चौड़ाई या ऊंचाई कम करें।",
     },
     "ai-canvas-expand": {
       quality: "क्वालिटी",
@@ -3064,6 +3070,7 @@ export const hi: TranslationKeys = {
       submit: "GIF प्रोसेस करें",
       submitBatch: "प्रोसेस करें ({count} फाइलें)",
       progressLabel: "GIF प्रोसेस हो रहा है",
+      maxDimensionExceeded: "1 से {max} px तक का आकार इस्तेमाल करें।",
     },
     "image-to-base64": {
       converting: "कन्वर्ट हो रहा है...",
@@ -3508,8 +3515,7 @@ export const hi: TranslationKeys = {
       bestEffortHint:
         "अधिकतम संभव प्रयास. छवि-आधारित PDF इसके करीब पहुंचती हैं; केवल-टेक्स्ट वाली PDF शायद इस आकार तक न सिकुड़ें.",
       targetReached: "आपका {target} लक्ष्य पूरा हुआ (परिणाम: {size}).",
-      targetMissed:
-        "{target} तक नहीं पहुंच सके. सबसे छोटा संभव आकार {size} था क्योंकि यह PDF मुख्य रूप से टेक्स्ट या वेक्टर से बनी है, जिन्हें छवि संपीड़न छोटा नहीं कर सकता.",
+      targetMissed: "{target} तक नहीं पहुंच सके. सबसे छोटा संभव आकार {size} था.",
     },
     "rotate-pdf": {
       angle: "घुमाव कोण",

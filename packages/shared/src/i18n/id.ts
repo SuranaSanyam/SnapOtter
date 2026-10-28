@@ -1446,6 +1446,8 @@ export const id: TranslationKeys = {
       submit: "Ubah Ukuran",
       submitBatch: "Ubah Ukuran ({count} file)",
       progressLabel: "Mengubah ukuran",
+      maxDimensionExceeded: "Gunakan ukuran 1 hingga {max} px.",
+      maxPercentageExceeded: "Gunakan skala dari 1 hingga {max}%.",
     },
     crop: {
       width: "Lebar",
@@ -2085,6 +2087,9 @@ export const id: TranslationKeys = {
       submitSubject: "Potong Cerdas",
       submitFace: "Potong Wajah",
       submitTrim: "Trim Border",
+      maxDimensionExceeded: "Gunakan ukuran 1 hingga {max} px.",
+      cropAreaExceeded:
+        "Potongan ini melebihi batas {max} piksel. Kurangi lebar, tinggi, atau padding.",
     },
     imageEnhancement: {
       enhancementMode: "Mode Peningkatan",
@@ -2211,6 +2216,9 @@ export const id: TranslationKeys = {
       submit: "Ubah Ukuran",
       submitBatch: "Ubah Ukuran ({count} file)",
       progressLabel: "Mengubah ukuran content-aware",
+      maxDimensionExceeded: "Gunakan ukuran 1 hingga {max} px.",
+      areaExceeded:
+        "Ubah ukuran sadar konten dibatasi {max} piksel total. Kurangi lebar atau tinggi.",
     },
     "ai-canvas-expand": {
       quality: "Kualitas",
@@ -3259,6 +3267,7 @@ export const id: TranslationKeys = {
       submit: "Proses GIF",
       submitBatch: "Proses ({count} file)",
       progressLabel: "Memproses GIF",
+      maxDimensionExceeded: "Gunakan ukuran 1 hingga {max} px.",
     },
     "image-to-base64": {
       converting: "Mengonversi...",
@@ -3705,7 +3714,7 @@ export const id: TranslationKeys = {
         "Maksimum sebisa mungkin. PDF berbasis gambar mendekati ukuran ini; PDF berisi teks saja mungkin tidak menyusut ke ukuran ini.",
       targetReached: "Target {target} tercapai (hasil: {size}).",
       targetMissed:
-        "Tidak dapat mencapai {target}. Ukuran terkecil yang bisa dicapai adalah {size} karena PDF ini sebagian besar berupa teks atau vektor, yang tidak dapat diperkecil oleh kompresi gambar.",
+        "Tidak dapat mencapai {target}. Ukuran terkecil yang bisa dicapai adalah {size}.",
     },
     "rotate-pdf": {
       angle: "Sudut rotasi",

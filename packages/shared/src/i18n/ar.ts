@@ -1433,6 +1433,8 @@ export const ar: TranslationKeys = {
       submit: "تغيير الحجم",
       submitBatch: "تغيير الحجم ({count} ملف)",
       progressLabel: "جاري تغيير الحجم",
+      maxDimensionExceeded: "استخدم مقاسًا من 1 إلى {max} بكسل.",
+      maxPercentageExceeded: "استخدم نسبة تكبير من 1 إلى {max}%.",
     },
     crop: {
       width: "العرض",
@@ -2068,6 +2070,9 @@ export const ar: TranslationKeys = {
       submitSubject: "قص ذكي",
       submitFace: "قص الوجه",
       submitTrim: "تقليم الحدود",
+      maxDimensionExceeded: "استخدم مقاسًا من 1 إلى {max} بكسل.",
+      cropAreaExceeded:
+        "هذا الاقتصاص يتجاوز حد {max} بكسل. قلّل العرض أو الارتفاع أو المساحة الإضافية.",
     },
     imageEnhancement: {
       enhancementMode: "وضع التحسين",
@@ -2192,6 +2197,9 @@ export const ar: TranslationKeys = {
       submit: "تغيير الحجم",
       submitBatch: "تغيير الحجم ({count} ملف)",
       progressLabel: "تغيير حجم ذكي",
+      maxDimensionExceeded: "استخدم مقاسًا من 1 إلى {max} بكسل.",
+      areaExceeded:
+        "يقتصر تغيير الحجم المدرك للمحتوى على {max} بكسل إجمالًا. قلّل العرض أو الارتفاع.",
     },
     "ai-canvas-expand": {
       quality: "الجودة",
@@ -3234,6 +3242,7 @@ export const ar: TranslationKeys = {
       submit: "معالجة GIF",
       submitBatch: "معالجة ({count} ملف)",
       progressLabel: "جاري معالجة GIF",
+      maxDimensionExceeded: "استخدم مقاسًا من 1 إلى {max} بكسل.",
     },
     "image-to-base64": {
       converting: "جاري التحويل...",
@@ -3678,8 +3687,7 @@ export const ar: TranslationKeys = {
       bestEffortHint:
         "الحد الأقصى قدر الإمكان. ملفات PDF المستندة إلى الصور تقترب من هذا الحجم؛ أما ملفات PDF النصية فقد لا تنكمش إلى هذا الحجم.",
       targetReached: "تم الوصول إلى الحجم المستهدف {target} (النتيجة: {size}).",
-      targetMissed:
-        "تعذّر الوصول إلى {target}. أصغر حجم يمكن تحقيقه هو {size} لأن ملف PDF هذا يتكوّن في الغالب من نصوص أو رسومات متجهة لا يمكن لضغط الصور تصغيرها.",
+      targetMissed: "تعذّر الوصول إلى {target}. أصغر حجم يمكن تحقيقه هو {size}.",
     },
     "rotate-pdf": {
       angle: "زاوية التدوير",

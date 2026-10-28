@@ -1211,6 +1211,8 @@ export const zhTW: TranslationKeys = {
       submit: "調整大小",
       submitBatch: "調整大小（{count}個檔案）",
       progressLabel: "調整大小中",
+      maxDimensionExceeded: "請使用 1 到 {max} px 之間的尺寸。",
+      maxPercentageExceeded: "請使用 1% 到 {max}% 之間的縮放比例。",
     },
     crop: {
       width: "寬度",
@@ -1835,6 +1837,8 @@ export const zhTW: TranslationKeys = {
       submitSubject: "智慧裁切",
       submitFace: "臉部裁切",
       submitTrim: "修剪邊框",
+      maxDimensionExceeded: "請使用 1 到 {max} px 之間的尺寸。",
+      cropAreaExceeded: "此裁切區域超過 {max} 像素的上限。請減小寬度、高度或內距。",
     },
     imageEnhancement: {
       enhancementMode: "增強模式",
@@ -1953,6 +1957,8 @@ export const zhTW: TranslationKeys = {
       submit: "調整大小",
       submitBatch: "調整大小（{count}個檔案）",
       progressLabel: "內容感知縮放中",
+      maxDimensionExceeded: "請使用 1 到 {max} px 之間的尺寸。",
+      areaExceeded: "內容感知縮放總計上限為 {max} 像素。請減小寬度或高度。",
     },
     "ai-canvas-expand": {
       quality: "品質",
@@ -2994,6 +3000,7 @@ export const zhTW: TranslationKeys = {
       submit: "處理GIF",
       submitBatch: "處理（{count}個檔案）",
       progressLabel: "正在處理GIF",
+      maxDimensionExceeded: "請使用 1 到 {max} px 之間的尺寸。",
     },
     "image-to-base64": {
       converting: "轉換中...",
@@ -3436,8 +3443,7 @@ export const zhTW: TranslationKeys = {
       bestEffortHint:
         "盡力壓縮的上限。以影像為主的 PDF 會接近此大小；純文字 PDF 可能無法縮小到此大小。",
       targetReached: "已達到你設定的 {target} 目標（結果：{size}）。",
-      targetMissed:
-        "無法達到 {target}。可達成的最小大小為 {size}，因為此 PDF 主要由文字或向量圖形組成，影像壓縮無法將其縮小。",
+      targetMissed: "無法達到 {target}。可達成的最小大小為 {size}。",
     },
     "rotate-pdf": {
       angle: "旋轉角度",

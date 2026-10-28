@@ -1395,6 +1395,8 @@ export const en = {
       submit: "Resize",
       submitBatch: "Resize ({count} files)",
       progressLabel: "Resizing",
+      maxDimensionExceeded: "Use a size from 1 to {max} px.",
+      maxPercentageExceeded: "Use a scale from 1 to {max}%.",
     },
     crop: {
       yOfMax: "Y (of {max})",
@@ -2028,6 +2030,9 @@ export const en = {
       padColor: "Pad color",
       trimHint:
         'Removes uniform-color borders around your subject. Enable "Pad to square" for e-commerce ready images.',
+      maxDimensionExceeded: "Use a size from 1 to {max} px.",
+      cropAreaExceeded:
+        "This crop is over the {max} pixel limit. Lower the width, height, or padding.",
       submitSubject: "Smart Crop",
       submitFace: "Face Crop",
       submitTrim: "Trim Borders",
@@ -2156,6 +2161,9 @@ export const en = {
       submit: "Resize",
       submitBatch: "Resize ({count} files)",
       progressLabel: "Content-aware resizing",
+      maxDimensionExceeded: "Use a size from 1 to {max} px.",
+      areaExceeded:
+        "Content-aware resize is capped at {max} total pixels. Lower the width or height.",
     },
     "ai-canvas-expand": {
       quality: "Quality",
@@ -3200,6 +3208,7 @@ export const en = {
       submit: "Process GIF",
       submitBatch: "Process ({count} files)",
       progressLabel: "Processing GIF",
+      maxDimensionExceeded: "Use a size from 1 to {max} px.",
     },
     "image-to-base64": {
       converting: "Converting...",
@@ -3644,8 +3653,7 @@ export const en = {
       bestEffortHint:
         "Best-effort maximum. Image-based PDFs land close; text-only PDFs may not shrink to this size.",
       targetReached: "Reached your {target} target (result: {size}).",
-      targetMissed:
-        "Couldn't reach {target}. Smallest achievable was {size} because this PDF is mostly text or vectors, which image compression can't shrink.",
+      targetMissed: "Couldn't reach {target}. Smallest achievable was {size}.",
     },
     "rotate-pdf": {
       angle: "Rotation angle",

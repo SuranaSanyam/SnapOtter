@@ -1406,6 +1406,8 @@ export const ja: TranslationKeys = {
       submit: "リサイズ",
       submitBatch: "リサイズ（{count}ファイル）",
       progressLabel: "リサイズ中",
+      maxDimensionExceeded: "1〜{max} px のサイズを指定してください。",
+      maxPercentageExceeded: "1〜{max}% の倍率を指定してください。",
     },
     crop: {
       width: "幅",
@@ -2044,6 +2046,9 @@ export const ja: TranslationKeys = {
       submitSubject: "スマートクロップ",
       submitFace: "顔クロップ",
       submitTrim: "ボーダートリム",
+      maxDimensionExceeded: "1〜{max} px のサイズを指定してください。",
+      cropAreaExceeded:
+        "この切り抜きは {max} ピクセルの上限を超えています。幅、高さ、パディングを小さくしてください。",
     },
     imageEnhancement: {
       enhancementMode: "エンハンスモード",
@@ -2169,6 +2174,9 @@ export const ja: TranslationKeys = {
       submit: "リサイズ",
       submitBatch: "リサイズ（{count}ファイル）",
       progressLabel: "コンテンツ認識リサイズ中",
+      maxDimensionExceeded: "1〜{max} px のサイズを指定してください。",
+      areaExceeded:
+        "コンテンツ認識リサイズは合計 {max} ピクセルまでです。幅または高さを小さくしてください。",
     },
     "ai-canvas-expand": {
       quality: "品質",
@@ -3214,6 +3222,7 @@ export const ja: TranslationKeys = {
       submit: "GIF処理",
       submitBatch: "処理（{count}ファイル）",
       progressLabel: "GIFを処理中",
+      maxDimensionExceeded: "1〜{max} px のサイズを指定してください。",
     },
     "image-to-base64": {
       converting: "変換中...",
@@ -3658,8 +3667,7 @@ export const ja: TranslationKeys = {
       bestEffortHint:
         "可能な限りの上限です。画像ベースのPDFはこのサイズに近づきますが、テキストのみのPDFはこのサイズまで縮小できない場合があります。",
       targetReached: "目標の{target}に到達しました（結果: {size}）。",
-      targetMissed:
-        "{target}に到達できませんでした。このPDFは主にテキストまたはベクターで構成されており、画像圧縮では縮小できないため、達成できた最小サイズは{size}でした。",
+      targetMissed: "{target}に到達できませんでした。達成できた最小サイズは{size}でした。",
     },
     "rotate-pdf": {
       angle: "回転角度",

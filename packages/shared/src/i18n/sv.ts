@@ -1446,6 +1446,8 @@ export const sv: TranslationKeys = {
       submit: "Ändra storlek",
       submitBatch: "Ändra storlek ({count} filer)",
       progressLabel: "Ändrar storlek",
+      maxDimensionExceeded: "Använd en storlek från 1 till {max} px.",
+      maxPercentageExceeded: "Använd en skala från 1 till {max} %.",
     },
     crop: {
       width: "Bredd",
@@ -2085,6 +2087,9 @@ export const sv: TranslationKeys = {
       submitSubject: "Smart beskärning",
       submitFace: "Ansiktsbeskärning",
       submitTrim: "Trimma kanter",
+      maxDimensionExceeded: "Använd en storlek från 1 till {max} px.",
+      cropAreaExceeded:
+        "Det här utsnittet överskrider gränsen på {max} pixlar. Minska bredden, höjden eller utfyllnaden.",
     },
     imageEnhancement: {
       enhancementMode: "Förstärkningsmetod",
@@ -2211,6 +2216,9 @@ export const sv: TranslationKeys = {
       submit: "Ändra storlek",
       submitBatch: "Ändra storlek ({count} filer)",
       progressLabel: "Innehållsmedveten storleksändring",
+      maxDimensionExceeded: "Använd en storlek från 1 till {max} px.",
+      areaExceeded:
+        "Innehållsmedveten storleksändring är begränsad till {max} pixlar totalt. Minska bredden eller höjden.",
     },
     "ai-canvas-expand": {
       quality: "Kvalitet",
@@ -3256,6 +3264,7 @@ export const sv: TranslationKeys = {
       submit: "Bearbeta GIF",
       submitBatch: "Bearbeta ({count} filer)",
       progressLabel: "Bearbetar GIF",
+      maxDimensionExceeded: "Använd en storlek från 1 till {max} px.",
     },
     "image-to-base64": {
       converting: "Konverterar...",
@@ -3700,8 +3709,7 @@ export const sv: TranslationKeys = {
       bestEffortHint:
         "Bästa möjliga maximum. Bildbaserade PDF:er kommer nära; PDF:er med enbart text krymper kanske inte till denna storlek.",
       targetReached: "Målet på {target} uppnåddes (resultat: {size}).",
-      targetMissed:
-        "Kunde inte nå {target}. Minsta möjliga storlek var {size} eftersom denna PDF mestadels består av text eller vektorer, som bildkomprimering inte kan krympa.",
+      targetMissed: "Kunde inte nå {target}. Minsta möjliga storlek var {size}.",
     },
     "rotate-pdf": {
       angle: "Rotationsvinkel",
