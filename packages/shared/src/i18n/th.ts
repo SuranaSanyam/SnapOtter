@@ -1424,6 +1424,8 @@ export const th: TranslationKeys = {
       submit: "ปรับขนาด",
       submitBatch: "ปรับขนาด ({count} ไฟล์)",
       progressLabel: "กำลังปรับขนาด",
+      maxDimensionExceeded: "ใช้ขนาดตั้งแต่ 1 ถึง {max} px",
+      maxPercentageExceeded: "ใช้มาตราส่วนตั้งแต่ 1 ถึง {max}%",
     },
     crop: {
       width: "ความกว้าง",
@@ -2048,6 +2050,8 @@ export const th: TranslationKeys = {
       submitSubject: "ครอปอัจฉริยะ",
       submitFace: "ครอปใบหน้า",
       submitTrim: "ตัดขอบ",
+      maxDimensionExceeded: "ใช้ขนาดตั้งแต่ 1 ถึง {max} px",
+      cropAreaExceeded: "การครอปนี้เกินขีดจำกัด {max} พิกเซล ลดความกว้าง ความสูง หรือระยะห่างภายในลง",
     },
     imageEnhancement: {
       enhancementMode: "โหมดปรับปรุง",
@@ -2173,6 +2177,8 @@ export const th: TranslationKeys = {
       submit: "ปรับขนาด",
       submitBatch: "ปรับขนาด ({count} ไฟล์)",
       progressLabel: "กำลังปรับขนาดแบบรับรู้เนื้อหา",
+      maxDimensionExceeded: "ใช้ขนาดตั้งแต่ 1 ถึง {max} px",
+      areaExceeded: "การปรับขนาดแบบรับรู้เนื้อหาจำกัดที่ {max} พิกเซลรวม ลดความกว้างหรือความสูง",
     },
     "ai-canvas-expand": {
       quality: "คุณภาพ",
@@ -3214,6 +3220,7 @@ export const th: TranslationKeys = {
       submit: "ประมวลผล GIF",
       submitBatch: "ประมวลผล ({count} ไฟล์)",
       progressLabel: "กำลังประมวลผล GIF",
+      maxDimensionExceeded: "ใช้ขนาดตั้งแต่ 1 ถึง {max} px",
     },
     "image-to-base64": {
       converting: "กำลังแปลง...",

@@ -1449,6 +1449,8 @@ export const tr: TranslationKeys = {
       submit: "Boyutlandır",
       submitBatch: "Boyutlandır ({count} dosya)",
       progressLabel: "Boyutlandırılıyor",
+      maxDimensionExceeded: "1 ile {max} px arasında bir boyut kullanın.",
+      maxPercentageExceeded: "%1 ile %{max} arasında bir ölçek kullanın.",
     },
     crop: {
       width: "Genişlik",
@@ -2091,6 +2093,9 @@ export const tr: TranslationKeys = {
       submitSubject: "Akıllı Kırp",
       submitFace: "Yüz Kırpma",
       submitTrim: "Kenarlıkları Kırp",
+      maxDimensionExceeded: "1 ile {max} px arasında bir boyut kullanın.",
+      cropAreaExceeded:
+        "Bu kırpma {max} piksel sınırını aşıyor. Genişliği, yüksekliği veya dolguyu azaltın.",
     },
     imageEnhancement: {
       enhancementMode: "İyileştirme Modu",
@@ -2216,6 +2221,9 @@ export const tr: TranslationKeys = {
       submit: "Boyutlandır",
       submitBatch: "Boyutlandır ({count} dosya)",
       progressLabel: "İçerik duyarlı boyutlandırma",
+      maxDimensionExceeded: "1 ile {max} px arasında bir boyut kullanın.",
+      areaExceeded:
+        "İçerik algılayan yeniden boyutlandırma toplam {max} piksel ile sınırlıdır. Genişliği veya yüksekliği azaltın.",
     },
     "ai-canvas-expand": {
       quality: "Kalite",
@@ -3263,6 +3271,7 @@ export const tr: TranslationKeys = {
       submit: "GIF İşle",
       submitBatch: "İşle ({count} dosya)",
       progressLabel: "GIF işleniyor",
+      maxDimensionExceeded: "1 ile {max} px arasında bir boyut kullanın.",
     },
     "image-to-base64": {
       converting: "Dönüştürülüyor...",

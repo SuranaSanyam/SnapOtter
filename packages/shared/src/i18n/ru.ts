@@ -1450,6 +1450,8 @@ export const ru: TranslationKeys = {
       submit: "Изменить размер",
       submitBatch: "Изменить размер ({count} файлов)",
       progressLabel: "Изменение размера",
+      maxDimensionExceeded: "Используйте размер от 1 до {max} px.",
+      maxPercentageExceeded: "Используйте масштаб от 1 до {max}%.",
     },
     crop: {
       width: "Ширина",
@@ -2092,6 +2094,9 @@ export const ru: TranslationKeys = {
       submitSubject: "Умная обрезка",
       submitFace: "Обрезка по лицу",
       submitTrim: "Обрезать поля",
+      maxDimensionExceeded: "Используйте размер от 1 до {max} px.",
+      cropAreaExceeded:
+        "Этот фрагмент превышает лимит в {max} пикселей. Уменьшите ширину, высоту или отступ.",
     },
     imageEnhancement: {
       enhancementMode: "Режим улучшения",
@@ -2218,6 +2223,9 @@ export const ru: TranslationKeys = {
       submit: "Изменить размер",
       submitBatch: "Изменить размер ({count} файлов)",
       progressLabel: "Контентно-зависимое масштабирование",
+      maxDimensionExceeded: "Используйте размер от 1 до {max} px.",
+      areaExceeded:
+        "Изменение размера с учётом содержимого ограничено {max} пикселями в сумме. Уменьшите ширину или высоту.",
     },
     "ai-canvas-expand": {
       quality: "Качество",
@@ -3267,6 +3275,7 @@ export const ru: TranslationKeys = {
       submit: "Обработать GIF",
       submitBatch: "Обработать ({count} файлов)",
       progressLabel: "Обработка GIF",
+      maxDimensionExceeded: "Используйте размер от 1 до {max} px.",
     },
     "image-to-base64": {
       converting: "Конвертация...",

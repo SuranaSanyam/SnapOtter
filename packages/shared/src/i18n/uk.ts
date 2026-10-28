@@ -1449,6 +1449,8 @@ export const uk: TranslationKeys = {
       submit: "Змінити розмір",
       submitBatch: "Змінити розмір ({count} файлів)",
       progressLabel: "Зміна розміру",
+      maxDimensionExceeded: "Використовуйте розмір від 1 до {max} px.",
+      maxPercentageExceeded: "Використовуйте масштаб від 1 до {max}%.",
     },
     crop: {
       width: "Ширина",
@@ -2095,6 +2097,9 @@ export const uk: TranslationKeys = {
       submitSubject: "Розумна обрізка",
       submitFace: "Обрізка по обличчю",
       submitTrim: "Обрізати поля",
+      maxDimensionExceeded: "Використовуйте розмір від 1 до {max} px.",
+      cropAreaExceeded:
+        "Цей фрагмент перевищує ліміт у {max} пікселів. Зменште ширину, висоту або відступ.",
     },
     imageEnhancement: {
       enhancementMode: "Режим поліпшення",
@@ -2221,6 +2226,9 @@ export const uk: TranslationKeys = {
       submit: "Змінити розмір",
       submitBatch: "Змінити розмір ({count} файлів)",
       progressLabel: "Контентно-залежне масштабування",
+      maxDimensionExceeded: "Використовуйте розмір від 1 до {max} px.",
+      areaExceeded:
+        "Зміна розміру з урахуванням вмісту обмежена {max} пікселями загалом. Зменште ширину або висоту.",
     },
     "ai-canvas-expand": {
       quality: "Якість",
@@ -3268,6 +3276,7 @@ export const uk: TranslationKeys = {
       submit: "Обробити GIF",
       submitBatch: "Обробити ({count} файлів)",
       progressLabel: "Обробка GIF",
+      maxDimensionExceeded: "Використовуйте розмір від 1 до {max} px.",
     },
     "image-to-base64": {
       converting: "Конвертація...",

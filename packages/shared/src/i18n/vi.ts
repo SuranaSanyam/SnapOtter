@@ -1446,6 +1446,8 @@ export const vi: TranslationKeys = {
       submit: "Thay đổi kích thước",
       submitBatch: "Thay đổi kích thước ({count} tệp)",
       progressLabel: "Đang thay đổi kích thước",
+      maxDimensionExceeded: "Dùng kích thước từ 1 đến {max} px.",
+      maxPercentageExceeded: "Dùng tỉ lệ từ 1 đến {max}%.",
     },
     crop: {
       width: "Chiều rộng",
@@ -2085,6 +2087,9 @@ export const vi: TranslationKeys = {
       submitSubject: "Cắt thông minh",
       submitFace: "Cắt khuôn mặt",
       submitTrim: "Cắt viền",
+      maxDimensionExceeded: "Dùng kích thước từ 1 đến {max} px.",
+      cropAreaExceeded:
+        "Vùng cắt này vượt giới hạn {max} pixel. Giảm chiều rộng, chiều cao hoặc khoảng đệm.",
     },
     imageEnhancement: {
       enhancementMode: "Chế độ nâng cao",
@@ -2211,6 +2216,9 @@ export const vi: TranslationKeys = {
       submit: "Thay đổi kích thước",
       submitBatch: "Thay đổi kích thước ({count} tệp)",
       progressLabel: "Đang thay đổi kích thước thông minh",
+      maxDimensionExceeded: "Dùng kích thước từ 1 đến {max} px.",
+      areaExceeded:
+        "Thay đổi kích thước nhận biết nội dung được giới hạn ở tổng {max} pixel. Giảm chiều rộng hoặc chiều cao.",
     },
     "ai-canvas-expand": {
       quality: "Chất lượng",
@@ -3256,6 +3264,7 @@ export const vi: TranslationKeys = {
       submit: "Xử lý GIF",
       submitBatch: "Xử lý ({count} tệp)",
       progressLabel: "Đang xử lý GIF",
+      maxDimensionExceeded: "Dùng kích thước từ 1 đến {max} px.",
     },
     "image-to-base64": {
       converting: "Đang chuyển đổi...",

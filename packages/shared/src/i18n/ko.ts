@@ -1386,6 +1386,8 @@ export const ko: TranslationKeys = {
       submit: "리사이즈",
       submitBatch: "리사이즈 ({count}개 파일)",
       progressLabel: "리사이즈 중",
+      maxDimensionExceeded: "1~{max} px 사이의 크기를 사용하세요.",
+      maxPercentageExceeded: "1~{max}% 사이의 배율을 사용하세요.",
     },
     crop: {
       width: "너비",
@@ -2022,6 +2024,9 @@ export const ko: TranslationKeys = {
       submitSubject: "스마트 크롭",
       submitFace: "얼굴 크롭",
       submitTrim: "테두리 트림",
+      maxDimensionExceeded: "1~{max} px 사이의 크기를 사용하세요.",
+      cropAreaExceeded:
+        "이 자르기는 {max} 픽셀 한도를 초과합니다. 너비, 높이 또는 패딩을 줄이세요.",
     },
     imageEnhancement: {
       enhancementMode: "향상 모드",
@@ -2147,6 +2152,8 @@ export const ko: TranslationKeys = {
       submit: "리사이즈",
       submitBatch: "리사이즈 ({count}개 파일)",
       progressLabel: "콘텐츠 인식 리사이즈 중",
+      maxDimensionExceeded: "1~{max} px 사이의 크기를 사용하세요.",
+      areaExceeded: "콘텐츠 인식 크기 조정은 총 {max}픽셀로 제한됩니다. 너비나 높이를 줄이세요.",
     },
     "ai-canvas-expand": {
       quality: "품질",
@@ -3191,6 +3198,7 @@ export const ko: TranslationKeys = {
       submit: "GIF 처리",
       submitBatch: "처리 ({count}개 파일)",
       progressLabel: "GIF 처리 중",
+      maxDimensionExceeded: "1~{max} px 사이의 크기를 사용하세요.",
     },
     "image-to-base64": {
       converting: "변환 중...",
