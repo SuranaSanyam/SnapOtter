@@ -226,7 +226,7 @@ export function CanvasResizeDialog({ open, onClose }: { open: boolean; onClose: 
                 "disabled:cursor-not-allowed disabled:opacity-50",
               )}
             />
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ms-auto flex items-center gap-1.5">
               <input
                 id="canvas-transparent"
                 type="checkbox"
