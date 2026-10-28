@@ -3700,8 +3700,7 @@ export const vi: TranslationKeys = {
       bestEffortHint:
         "Mức tối đa trong khả năng. PDF chứa hình ảnh sẽ đạt gần mức này; PDF chỉ có văn bản có thể không thu nhỏ được xuống kích thước này.",
       targetReached: "Đã đạt mục tiêu {target} (kết quả: {size}).",
-      targetMissed:
-        "Không thể đạt {target}. Kích thước nhỏ nhất có thể đạt là {size} vì PDF này chủ yếu là văn bản hoặc vector, mà nén ảnh không thể thu nhỏ.",
+      targetMissed: "Không thể đạt {target}. Kích thước nhỏ nhất có thể đạt là {size}.",
     },
     "rotate-pdf": {
       angle: "Góc xoay",

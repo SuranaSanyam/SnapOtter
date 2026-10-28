@@ -3705,7 +3705,7 @@ export const id: TranslationKeys = {
         "Maksimum sebisa mungkin. PDF berbasis gambar mendekati ukuran ini; PDF berisi teks saja mungkin tidak menyusut ke ukuran ini.",
       targetReached: "Target {target} tercapai (hasil: {size}).",
       targetMissed:
-        "Tidak dapat mencapai {target}. Ukuran terkecil yang bisa dicapai adalah {size} karena PDF ini sebagian besar berupa teks atau vektor, yang tidak dapat diperkecil oleh kompresi gambar.",
+        "Tidak dapat mencapai {target}. Ukuran terkecil yang bisa dicapai adalah {size}.",
     },
     "rotate-pdf": {
       angle: "Sudut rotasi",

@@ -3708,8 +3708,7 @@ export const tr: TranslationKeys = {
       bestEffortHint:
         "Elden gelenin en fazlası. Görüntü tabanlı PDF'ler bu boyuta yaklaşır; yalnızca metin içeren PDF'ler bu boyuta küçülmeyebilir.",
       targetReached: "{target} hedefinize ulaşıldı (sonuç: {size}).",
-      targetMissed:
-        "{target} boyutuna ulaşılamadı. Ulaşılabilen en küçük boyut {size} oldu; çünkü bu PDF çoğunlukla metin veya vektörlerden oluşuyor ve görüntü sıkıştırma bunları küçültemez.",
+      targetMissed: "{target} boyutuna ulaşılamadı. Ulaşılabilen en küçük boyut {size} oldu.",
     },
     "rotate-pdf": {
       angle: "Döndürme açısı",
