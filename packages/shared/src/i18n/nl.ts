@@ -3730,8 +3730,7 @@ export const nl: TranslationKeys = {
       bestEffortHint:
         "Maximaal haalbaar. Op afbeeldingen gebaseerde PDF's komen dichtbij; PDF's met alleen tekst worden mogelijk niet tot deze grootte verkleind.",
       targetReached: "Doel van {target} bereikt (resultaat: {size}).",
-      targetMissed:
-        "Kon {target} niet bereiken. De kleinst haalbare grootte was {size}, omdat deze PDF voornamelijk uit tekst of vectoren bestaat, die beeldcompressie niet kan verkleinen.",
+      targetMissed: "Kon {target} niet bereiken. De kleinst haalbare grootte was {size}.",
     },
     "rotate-pdf": {
       angle: "Rotatiehoek",

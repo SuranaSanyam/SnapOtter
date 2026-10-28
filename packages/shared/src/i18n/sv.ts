@@ -3709,8 +3709,7 @@ export const sv: TranslationKeys = {
       bestEffortHint:
         "Bästa möjliga maximum. Bildbaserade PDF:er kommer nära; PDF:er med enbart text krymper kanske inte till denna storlek.",
       targetReached: "Målet på {target} uppnåddes (resultat: {size}).",
-      targetMissed:
-        "Kunde inte nå {target}. Minsta möjliga storlek var {size} eftersom denna PDF mestadels består av text eller vektorer, som bildkomprimering inte kan krympa.",
+      targetMissed: "Kunde inte nå {target}. Minsta möjliga storlek var {size}.",
     },
     "rotate-pdf": {
       angle: "Rotationsvinkel",

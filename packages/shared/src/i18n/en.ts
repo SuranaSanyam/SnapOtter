@@ -3653,8 +3653,7 @@ export const en = {
       bestEffortHint:
         "Best-effort maximum. Image-based PDFs land close; text-only PDFs may not shrink to this size.",
       targetReached: "Reached your {target} target (result: {size}).",
-      targetMissed:
-        "Couldn't reach {target}. Smallest achievable was {size} because this PDF is mostly text or vectors, which image compression can't shrink.",
+      targetMissed: "Couldn't reach {target}. Smallest achievable was {size}.",
     },
     "rotate-pdf": {
       angle: "Rotation angle",
