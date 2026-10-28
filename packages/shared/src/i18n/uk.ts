@@ -4696,6 +4696,7 @@ export const uk: TranslationKeys = {
         anchorLabel: "Прив'язка:",
         anchorAriaLabel: "Прив'язка {position}",
         backgroundLabel: "Фон:",
+        transparent: "Прозорий",
         anchors: {
           topLeft: "вгорі ліворуч",
           topCenter: "вгорі по центру",

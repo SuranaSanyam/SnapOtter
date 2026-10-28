@@ -4656,6 +4656,7 @@ export const ar: TranslationKeys = {
         anchorLabel: "نقطة الارتكاز:",
         anchorAriaLabel: "ارتكاز {position}",
         backgroundLabel: "الخلفية:",
+        transparent: "شفاف",
         anchors: {
           topLeft: "أعلى اليسار",
           topCenter: "أعلى الوسط",

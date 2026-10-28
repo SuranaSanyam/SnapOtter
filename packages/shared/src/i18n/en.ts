@@ -4622,6 +4622,7 @@ export const en = {
         anchorLabel: "Anchor:",
         anchorAriaLabel: "Anchor {position}",
         backgroundLabel: "Background:",
+        transparent: "Transparent",
         anchors: {
           topLeft: "top left",
           topCenter: "top center",

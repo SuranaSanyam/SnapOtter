@@ -4410,6 +4410,7 @@ export const zhCN: TranslationKeys = {
         anchorLabel: "定位：",
         anchorAriaLabel: "定位到{position}",
         backgroundLabel: "背景：",
+        transparent: "透明",
         anchors: {
           topLeft: "左上",
           topCenter: "上中",

@@ -4695,6 +4695,7 @@ export const ru: TranslationKeys = {
         anchorLabel: "Расположение:",
         anchorAriaLabel: "Расположение: {position}",
         backgroundLabel: "Фон:",
+        transparent: "Прозрачный",
         anchors: {
           topLeft: "сверху слева",
           topCenter: "сверху по центру",

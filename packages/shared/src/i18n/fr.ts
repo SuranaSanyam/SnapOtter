@@ -4708,6 +4708,7 @@ export const fr: TranslationKeys = {
         anchorLabel: "Ancrage :",
         anchorAriaLabel: "Ancrage {position}",
         backgroundLabel: "Arrière-plan :",
+        transparent: "Transparent",
         anchors: {
           topLeft: "en haut à gauche",
           topCenter: "en haut au centre",

@@ -4686,6 +4686,7 @@ export const id: TranslationKeys = {
         anchorLabel: "Jangkar:",
         anchorAriaLabel: "Jangkar {position}",
         backgroundLabel: "Latar Belakang:",
+        transparent: "Transparan",
         anchors: {
           topLeft: "kiri atas",
           topCenter: "tengah atas",

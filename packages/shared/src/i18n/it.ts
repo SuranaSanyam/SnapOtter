@@ -4698,6 +4698,7 @@ export const it: TranslationKeys = {
         anchorLabel: "Ancoraggio:",
         anchorAriaLabel: "Ancoraggio {position}",
         backgroundLabel: "Sfondo:",
+        transparent: "Trasparente",
         anchors: {
           topLeft: "in alto a sinistra",
           topCenter: "in alto al centro",
